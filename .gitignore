@@ -1,0 +1,22 @@
+# Ignore generated data
+MUtyl/csv/*
+MUtyl/logs/*
+MUtyl/ModelSave/*
+
+# But keep the folder structure
+!MUtyl/csv/.gitkeep
+!MUtyl/logs/.gitkeep
+!MUtyl/ModelSave/.gitkeep
+
+# Other common patterns
+__pycache__/
+*.pyc
+*.pt
+*.pth
+*.log
+*.npy
+*.npz
+*.csv
+*.txt
+*.pdf
+*.png
