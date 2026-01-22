@@ -1,6 +1,35 @@
 import torch
 from torch import nn
+from types import MethodType
 from tqdm import tqdm
+
+
+def attach_esc_set(model: nn.Module) -> nn.Module:
+    """Attach a minimal esc_set implementation to a model.
+
+    This is a lightweight compatibility shim for models that do not define
+    esc_set themselves. It registers or updates a projection matrix buffer
+    named ``esc`` that can be consumed in the model's forward pass.
+
+    Note: the model must still apply the projection (using ``model.esc``) in
+    forward for ESC to have an effect. This helper only provides the setter.
+    """
+
+    def _esc_set(self, u, esc_t: bool = False):
+        if esc_t:
+            if hasattr(self, "esc"):
+                self.esc = u
+            else:
+                self.register_buffer("esc", u.T)
+        else:
+            if hasattr(self, "esc"):
+                self.esc = u @ self.esc
+            else:
+                self.register_buffer("esc", u)
+
+    if not hasattr(model, "esc_set"):
+        model.esc_set = MethodType(_esc_set, model)
+    return model
 
 
 class ESC:
@@ -13,6 +42,13 @@ class ESC:
 
     If use_esc_t is True, it follows the ESC-T procedure with a learnable
     mask over singular vectors.
+
+    Notes:
+        ESC requires the model to expose `esc_set(u, esc_t=False)`. This
+        method is defined in baselines/ESC/models.py and baselines/ESC/
+        vision_transformer.py, where it registers or updates a projection
+        matrix used during forward to erase the target subspace. The check
+        below ensures the provided model supports that projection hook.
     """
 
     def __init__(
@@ -45,7 +81,7 @@ class ESC:
             The unlearned model (modified in-place).
         """
         if not hasattr(model, "esc_set"):
-            raise ValueError("Model must implement esc_set for ESC unlearning.")
+            attach_esc_set(model)
 
         device = self.device or next(model.parameters()).device
         model.eval()
