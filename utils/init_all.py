@@ -32,19 +32,6 @@ def init_args():
     parser.add_argument("--is_task", type=bool, default=True)
     parser.add_argument("--torch_threads", type=int, default=4,
                         help="Number of threads to use for torch operations")
-    parser.add_argument(
-        "--handi_method",
-        type=str,
-        default="rand",
-        choices=["rand", "sn", "stft"],
-        help="Handcrafted UD template type used in main_handi.py",
-    )
-    parser.add_argument(
-        "--handi_alpha",
-        type=float,
-        default=0.05,
-        help="Scaling factor for handcrafted UD templates",
-    )
     # logs path
     parser.add_argument("--log_root", type=Path, default=default_log_root,
                         help="Directory to store training logs")
@@ -54,59 +41,6 @@ def init_args():
                         help="Directory to store exported CSV results")
     parser.add_argument("--extra_sys_path", type=Path, default=default_sys_path,
                         help="Additional path to append to sys.path for imports")
-    parser.add_argument(
-        "--lock_type",
-        type=str,
-        default="linear",
-        choices=["linear", "ires"],
-        help="Type of learnability lock to apply during training",
-    )
-    parser.add_argument(
-        "--lock_epsilon",
-        type=float,
-        default=1e-3,
-        help="Perturbation budget (epsilon) used by learnability locks",
-    )
-    parser.add_argument(
-        "--lock_mid_planes",
-        type=int,
-        default=4,
-        help="Hidden channel size for iResLock transforms",
-    )
-    # em args
-    """
-     Error-Minimization (EM) 参数说明：
-      - em_outer：外层EM迭代轮数（算法1中的循环次数）。
-      - em_iters：em_outer的兼容别名；若设置则覆盖em_outer。
-      - em_theta_epochs：每次刷新噪声前，模型参数更新的epoch数（算法1中的M）。
-      - em_pgd_steps：用于更新误差最小化噪声δ的PGD步数。
-      - em_eps：噪声的L_inf半径限制。
-      - em_alpha：PGD更新步长，默认取em_eps/10。
-      - em_lambda：训练误差阈值λ，低于该值则提前停止EM。
-      - em_clip_min / em_clip_max：对扰动后输入的可选下/上界（如图像0~1范围）。
-      - em_init_model：EM阶段初始化模型权重的可选检查点路径。
-    """
-    parser.add_argument("--em_outer", type=int, default=100,
-                        help="Maximum number of outer error-minimization rounds (Algorithm 1)")
-    parser.add_argument("--em_iters", type=int, default=None,
-                        help="Deprecated alias for em_outer; if set, overrides em_outer")
-    parser.add_argument("--em_theta_epochs", type=int, default=5,
-                        help="Number of parameter-update epochs (M in Algorithm 1) before refreshing noise")
-    parser.add_argument("--em_pgd_steps", type=int, default=10,
-                        help="Number of PGD steps to update error-minimizing noise δ")
-    parser.add_argument("--em_eps", type=float, default=1e-3,
-                        help="L_inf radius for error-minimizing noise")
-    parser.add_argument("--em_alpha", type=float, default=None,
-                        help="Step size for PGD noise update; defaults to em_eps/10 when unset")
-    parser.add_argument("--em_lambda", type=float, default=0.1,
-                        help="Training error threshold λ to stop error-minimization early")
-    parser.add_argument("--em_clip_min", type=float, default=None,
-                        help="Optional lower clamp for perturbed inputs (e.g., 0.0 for images)")
-    parser.add_argument("--em_clip_max", type=float, default=None,
-                        help="Optional upper clamp for perturbed inputs (e.g., 1.0 for images)")
-    parser.add_argument("--em_init_model", type=str, default=None,
-                        help="Optional checkpoint path to initialize EM model weights")
-
     args = parser.parse_args()
 
     # Append additional sys.path if provided
@@ -155,6 +89,14 @@ def set_args(args: argparse.ArgumentParser):
         # UID分类
         if not args.is_task:
             args.nclass = 20
+    elif args.dataset in ["001", "004"]:
+        args.channel = 22 if args.dataset == "001" else 3
+        args.nclass = 4 if args.dataset == "001" else 2
+        args.fs = 250
+        args.timepoint = 4
+        # UID分类
+        if not args.is_task:
+            args.nclass = 9
     return args
 
 

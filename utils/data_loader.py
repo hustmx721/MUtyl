@@ -17,8 +17,8 @@ import psutil
 import scipy
 import scipy.io as scio
 from sklearn.model_selection import train_test_split
-from utils.dataset import ToDataLoader, set_seed
-from utils.preprocess import preprocessing
+from dataset import ToDataLoader, set_seed
+from preprocess import preprocessing
 
 
 # CPU kernel limitation
@@ -57,41 +57,13 @@ def _process_in_chunks(data, processor):
             processed_data[i : i + chunk_size] = future.result()
     return processed_data
 
-
-# Get Filter-bank EEG
-def SubBandSplit(data: np.ndarray, freq_start: int = 4, freq_end: int = 40, bandwidth: int = 4, fs: int = 250):
-    """
-    优化后的子带切分函数
-    data(batch,channel,time) --> sub_band_data(batch,(channel*nBands),time)
-    """
-
-    @lru_cache(maxsize=32)
-    def get_sos_coeffs(freq_low, freq_high, fs):
-        """缓存并返回 SOS 滤波器系数"""
-        return scipy.signal.butter(6, [2.0 * freq_low / fs, 2.0 * freq_high / fs], "bandpass", output="sos")
-
-    def process_single_band(args):
-        """处理单个频带的数据"""
-        data, freq_low, freq_high = args
-        sos = get_sos_coeffs(freq_low, freq_high, fs)
-        return scipy.signal.sosfilt(sos, data, axis=-1)
-
-    subbands = np.arange(freq_start, freq_end + 1, bandwidth)
-    with ThreadPoolExecutor(max_workers=DEFAULT_WORKERS) as executor:
-        band_args = [(data, low_freq, high_freq) for low_freq, high_freq in zip(subbands[:-1], subbands[1:])]
-        results = list(executor.map(process_single_band, band_args))
-
-    sub_band_data = np.stack(results, axis=1).astype(np.float32)
-    del results
-    gc.collect()
-    # return rearrange(sub_band_data, 'b c t n -> b (c n) t')
-    return sub_band_data
-
-
-def GetLoader14xxx(seed, split: str = "001", batchsize: int = 64, pin_memory: bool = True):
+def GetLoader14xxx(seed, split: str = "001", is_task: bool = True, batchsize: int = 64, pin_memory: bool = True):
     data = scio.loadmat(f"/mnt/data1/tyl/UserID/dataset/mydata/ori_{split}.mat")
-    data1, label1 = data["ori_train_x"], data["ori_train_s"]
-    data2, label2 = data["ori_test_x"], data["ori_test_s"]
+    data1, data2 = data["ori_train_x"], data["ori_test_x"]
+    if is_task:
+        label1, label2 = data["ori_train_y"], data["ori_test_y"]
+    else:
+        label1, label2 = data["ori_test_x"], data["ori_test_s"]
     label1, label2 = [label.squeeze() for label in [label1, label2]]
 
     DataProcessor = preprocessing(fs=250)
@@ -100,45 +72,9 @@ def GetLoader14xxx(seed, split: str = "001", batchsize: int = 64, pin_memory: bo
 
     print(f"数据比例-----训练集:验证集:测试集 = {tx.shape}:{vx.shape}:{data2.shape}")
 
-    trainloader, validateloader, testloader = _prepare_loaders(
-        tx,
-        vx,
-        data2,
-        ty,
-        vy,
-        label2,
-        batchsize,
-        pin_memory,
-    )
+    trainloader, validateloader, testloader = _prepare_loaders(tx, vx, data2, ty, vy, label2,
+        batchsize,pin_memory,)
     del data1, data2, label1, label2, tx, vx, ty, vy
-    gc.collect()
-    return trainloader, validateloader, testloader
-
-
-def GetloaderLJ30(seed, batchsize: int = 64, pin_memory: bool = True):
-    data = scio.loadmat("/mnt/data1/tyl/UserID/dataset/mydata/ori_LingJiu30.mat")
-    data1, data2 = data["ori_train_x"], data["ori_test_x"]
-    data1, data2 = [x.reshape((-1, x.shape[-2], x.shape[-1])) for x in [data1, data2]]
-    label1, label2 = data["ori_train_s"], data["ori_test_s"]
-    label1, label2 = [s.reshape(-1) for s in [label1, label2]]
-
-    DataProcessor = preprocessing(fs=300)
-    data1, data2 = [DataProcessor.EEGpipline(x) for x in [data1, data2]]
-    tx, vx, ts, vs = train_test_split(data1, label1, test_size=0.2, random_state=seed, stratify=label1)
-
-    print(f"数据比例-----训练集:验证集:测试集 = {tx.shape}:{vx.shape}:{data2.shape}")
-
-    trainloader, validateloader, testloader = _prepare_loaders(
-        tx,
-        vx,
-        data2,
-        ts,
-        vs,
-        label2,
-        batchsize,
-        pin_memory,
-    )
-    del data1, data2, label1, label2, tx, vx, ts, vs
     gc.collect()
     return trainloader, validateloader, testloader
 
@@ -182,14 +118,9 @@ def GetLoaderOpenBMI(seed, Task: str = "MI", batchsize: int = 64, is_task: bool 
     print(f"数据比例-----训练集:验证集:测试集 = {tx.shape}:{vx.shape}:{test_x.shape}")
 
     trainloader, validateloader, testloader = _prepare_loaders(
-        tx,
-        vx,
-        test_x,
-        ts,
-        vs,
-        test_y,
-        batchsize,
-        pin_memory,
+        tx,vx,test_x,
+        ts,vs,test_y,
+        batchsize,pin_memory,
     )
     del data_train, data_test, train_x, train_y, test_x, test_y, tx, vx, ts, vs
     gc.collect()
@@ -246,14 +177,9 @@ def GetLoaderM3CV(seed, Task: str = "Rest", batchsize: int = 64, is_task: bool =
     print(f"数据比例-----训练集:验证集:测试集 = {tx.shape}:{vx.shape}:{test_x.shape}")
 
     trainloader, validateloader, testloader = _prepare_loaders(
-        tx,
-        vx,
-        test_x,
-        ts,
-        vs,
-        test_y,
-        batchsize,
-        pin_memory,
+        tx, vx, test_x,
+        ts, vs,test_y,
+        batchsize, pin_memory,
     )
     del data_train, data_test, train_x, train_y, test_x, test_y, tx, vx, ts, vs
     gc.collect()
@@ -275,8 +201,6 @@ def Load_Dataloader(
         "001": "001",
         "14004": "004",
         "004": "004",
-        "LJ30": "LJ30",
-        "LingJiu30": "LJ30",
         "OpenBMI": "OpenBMI",
         "M3CV": "M3CV",
     }
@@ -297,12 +221,6 @@ def Load_Dataloader(
         trainloader, valloader, testloader = GetLoader14xxx(
             seed,
             split=dataset_key,
-            batchsize=batchsize,
-            pin_memory=pin_memory,
-        )
-    elif dataset_key == "LJ30":
-        trainloader, valloader, testloader = GetloaderLJ30(
-            seed,
             batchsize=batchsize,
             pin_memory=pin_memory,
         )
