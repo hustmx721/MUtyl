@@ -66,14 +66,20 @@ def _extract_subjects(data_dict, allow_label_fallback=False):
     return None
 
 
-def _split_by_subject_session(subjects, sessions, seed):
+def _split_by_subject_session(subjects, sessions, seed, forget_subject=None):
     set_seed(seed)
     subjects = np.asarray(subjects).reshape(-1)
     sessions = _ensure_session_array(sessions)
     unique_subjects = np.unique(subjects)
     if unique_subjects.size == 0:
         raise ValueError("No subjects found for MU split.")
-    forget_subject = np.random.choice(unique_subjects)
+    if forget_subject is None:
+        forget_subject = np.random.choice(unique_subjects)
+    else:
+        if forget_subject not in unique_subjects:
+            raise ValueError(
+                f"forget_subject={forget_subject} is not present in available subjects: {unique_subjects}"
+            )
 
     mask_subject = subjects == forget_subject
     mask_session1 = sessions == 1
@@ -115,6 +121,7 @@ def _build_mu_loaders(
     seed,
     batchsize,
     pin_memory,
+    forget_subject=None,
 ):
     (
         forget_subject,
@@ -123,7 +130,7 @@ def _build_mu_loaders(
         remain_test_idx,
         forget_test_idx,
         train_idx,
-    ) = _split_by_subject_session(subjects, sessions, seed)
+    ) = _split_by_subject_session(subjects, sessions, seed, forget_subject=forget_subject)
 
     train_loader = _make_loader(
         data[train_idx],
@@ -183,6 +190,7 @@ def GetMULoader14xxx(
     is_task: bool = True,
     batchsize: int = 64,
     pin_memory: bool = True,
+    forget_subject=None,
 ):
     data = scio.loadmat(f"/mnt/data1/tyl/UserID/dataset/mydata/ori_{split}.mat")
     data1, data2 = data["ori_train_x"], data["ori_test_x"]
@@ -224,6 +232,7 @@ def GetMULoader14xxx(
         seed,
         batchsize,
         pin_memory,
+        forget_subject=forget_subject,
     )
     del data1, data2, label1, label2, data_all, label_all, subject_all, session_all
     gc.collect()
@@ -236,6 +245,7 @@ def GetMULoaderOpenBMI(
     batchsize: int = 64,
     is_task: bool = True,
     pin_memory: bool = True,
+    forget_subject=None,
 ):
     def load_data(file_path):
         with open(file_path, "rb") as f:
@@ -289,6 +299,7 @@ def GetMULoaderOpenBMI(
         seed,
         batchsize,
         pin_memory,
+        forget_subject=forget_subject,
     )
     del data_train, data_test, train_x, train_y, test_x, test_y, data_all, label_all, subject_all, session_all
     gc.collect()
@@ -301,6 +312,7 @@ def GetMULoaderM3CV(
     batchsize: int = 64,
     is_task: bool = True,
     pin_memory: bool = True,
+    forget_subject=None,
 ):
     def load_data(file_path):
         with open(file_path, "rb") as f:
@@ -349,6 +361,7 @@ def GetMULoaderM3CV(
         seed,
         batchsize,
         pin_memory,
+        forget_subject=forget_subject,
     )
     del data_train, data_test, train_x, train_y, test_x, test_y, data_all, label_all, subject_all, session_all
     gc.collect()
@@ -362,6 +375,7 @@ def Load_MU_Dataloader(
     batchsize: int = 64,
     is_task: bool = True,
     pin_memory: bool = True,
+    forget_subject=None,
 ):
     openbmi_tasks = ["MI", "SSVEP", "ERP"]
     m3cv_tasks = ["Rest", "Transient", "Steady", "P300", "Motor", "SSVEP_SA"]
@@ -393,6 +407,7 @@ def Load_MU_Dataloader(
             batchsize=batchsize,
             pin_memory=pin_memory,
             is_task=is_task,
+            forget_subject=forget_subject,
         )
     elif dataset_key == "OpenBMI" and paradigm in openbmi_tasks:
         loaders = GetMULoaderOpenBMI(
@@ -401,6 +416,7 @@ def Load_MU_Dataloader(
             batchsize=batchsize,
             is_task=is_task,
             pin_memory=pin_memory,
+            forget_subject=forget_subject,
         )
     elif dataset_key == "M3CV" and paradigm in m3cv_tasks:
         loaders = GetMULoaderM3CV(
@@ -409,6 +425,7 @@ def Load_MU_Dataloader(
             batchsize=batchsize,
             is_task=is_task,
             pin_memory=pin_memory,
+            forget_subject=forget_subject,
         )
     else:
         raise ValueError(f"Invalid dataset or paradigm name: dataset={dataset}, paradigm={paradigm}")
