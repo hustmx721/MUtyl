@@ -30,21 +30,6 @@ def init_args():
     parser.add_argument("--model", type=str, default="EEGNet")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--is_task", type=bool, default=True)
-    parser.add_argument(
-        "--gpu_prefetch",
-        action="store_true",
-        help="Enable GPU-first dataloader path (preload tensors to GPU or pinned memory for LLock).",
-    )
-    parser.add_argument(
-        "--gpu_prefetch_pin_memory",
-        action="store_true",
-        help="Pin host memory when GPU-first prefetch is enabled and tensors remain on CPU.",
-    )
-    parser.add_argument(
-        "--gpu_prefetch_non_blocking",
-        action="store_true",
-        help="Use non_blocking transfers when moving prefetched tensors to GPU.",
-    )
     parser.add_argument("--torch_threads", type=int, default=4,
                         help="Number of threads to use for torch operations")
     parser.add_argument(
@@ -69,7 +54,6 @@ def init_args():
                         help="Directory to store exported CSV results")
     parser.add_argument("--extra_sys_path", type=Path, default=default_sys_path,
                         help="Additional path to append to sys.path for imports")
-    # LLock args
     parser.add_argument(
         "--lock_type",
         type=str,
@@ -174,37 +158,14 @@ def set_args(args: argparse.ArgumentParser):
     return args
 
 
-def load_data(args: argparse.ArgumentParser, include_index: bool = False):
-    OpenBMI = ["MI", "SSVEP", "ERP"]
-    M3CV = ["Rest", "Transient", "Steady", "P300", "Motor", "SSVEP_SA"]
-    loader_kwargs = dict(
-        include_index=include_index,
-        llock_gpu=getattr(args, "gpu_prefetch", False),
-        target_device=f"cuda:{args.gpuid}" if getattr(args, "gpu_prefetch", False) else None,
-        pin_memory=getattr(args, "gpu_prefetch_pin_memory", False) or getattr(args, "gpu_prefetch", False),
-        non_blocking=getattr(args, "gpu_prefetch_non_blocking", False) or getattr(args, "gpu_prefetch", False),
-    )
+def load_data(args: argparse.ArgumentParser):
     batch_size = getattr(args, "bs", 64)
-
-    if args.dataset in OpenBMI:
-        trainloader, valloader, testloader = GetLoaderOpenBMI(
-            args.seed,
-            Task=args.dataset,
-            batchsize=batch_size,
-            is_task=args.is_task,
-            **loader_kwargs,
-        )
-    elif args.dataset in M3CV:
-        trainloader, valloader, testloader = GetLoaderM3CV(
-            args.seed,
-            Task=args.dataset,
-            batchsize=batch_size,
-            is_task=args.is_task,
-            **loader_kwargs,
-        )
-    else:
-        raise ValueError("Invalid dataset name")
-    return trainloader, valloader, testloader
+    return Load_Dataloader(
+        args.seed,
+        args.dataset,
+        batchsize=batch_size,
+        is_task=args.is_task,
+    )
 
 
 
