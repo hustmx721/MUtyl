@@ -1,0 +1,19 @@
+exps/
+*.sh
+*.pdf
+*.pkl
+
+
+# PyInstaller
+__pycache__/
+
+# img
+*.jpg
+*.png
+*.jpeg
+!assets/*
+
+# PyTorch
+*.pt
+*.pth
+*.ckpt
