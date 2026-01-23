@@ -2,7 +2,8 @@ import os
 import gc
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-
+from pathlib import Path
+os.chdir(Path(__file__).resolve().parent)
 # Cap low-level library threading before importing heavy deps to avoid oversubscribing
 # Allow overriding via DATA_WORKERS env for easier debugging or tighter CPU limits.
 DEFAULT_WORKERS = max(1, int(os.environ.get("DATA_WORKERS", min(4, (os.cpu_count() or 1)))))
@@ -14,7 +15,6 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", str(DEFAULT_WORKERS))
 import pickle
 import numpy as np
 import psutil
-import scipy
 import scipy.io as scio
 from sklearn.model_selection import train_test_split
 from dataset import ToDataLoader, set_seed
@@ -244,3 +244,33 @@ def Load_Dataloader(
         raise ValueError(f"Invalid dataset or paradigm name: dataset={dataset}, paradigm={paradigm}")
 
     return trainloader, valloader, testloader
+
+
+import scipy
+def SubBandSplit(data: np.ndarray, freq_start: int = 4, freq_end: int = 40, bandwidth: int = 4, fs: int = 250):
+    """
+    优化后的子带切分函数
+    data(batch,channel,time) --> sub_band_data(batch,(channel*nBands),time)
+    """
+    @lru_cache(maxsize=32)
+    def get_sos_coeffs(freq_low, freq_high, fs):
+        """缓存并返回 SOS 滤波器系数"""
+        return scipy.signal.butter(6, [2.0 * freq_low / fs, 2.0 * freq_high / fs], 'bandpass', output='sos')
+
+    def process_single_band(args):
+        """处理单个频带的数据"""
+        data, freq_low, freq_high = args
+        sos = get_sos_coeffs(freq_low, freq_high, fs)
+        return scipy.signal.sosfilt(sos, data, axis=-1)
+
+    subbands = np.arange(freq_start, freq_end + 1, bandwidth)
+    with ThreadPoolExecutor(max_workers=DEFAULT_WORKERS) as executor:
+        band_args = [(data, low_freq, high_freq)
+                     for low_freq, high_freq in zip(subbands[:-1], subbands[1:])]
+        results = list(executor.map(process_single_band, band_args))
+
+    sub_band_data = np.stack(results, axis=1).astype(np.float32)
+    del results
+    gc.collect()
+    # return rearrange(sub_band_data, 'b c t n -> b (c n) t')
+    return sub_band_data

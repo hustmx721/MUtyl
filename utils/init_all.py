@@ -1,11 +1,12 @@
 import sys
 import os
 from pathlib import Path
-
+sys.path.append(str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 import torch
 import argparse
-from .data_loader import *
-from .models import LoadModel
+from data_loader import *
+from models import LoadModel
 
 
 def init_args():
@@ -34,9 +35,9 @@ def init_args():
                         help="Number of threads to use for torch operations")
     parser.add_argument("--forget_subject", type=int, default=None,
                         help="Subject ID to forget for MU splits (default: random)")
-    parser.add_argument("--dice_teacher_epochs", type=int, default=100,
+    parser.add_argument("--dice_teacher_epochs", type=int, default=300,
                         help="Number of epochs to train the DiCE teacher")
-    parser.add_argument("--dice_unlearn_epochs", type=int, default=30,
+    parser.add_argument("--dice_unlearn_epochs", type=int, default=100,
                         help="Number of epochs for DiCE unlearning")
     parser.add_argument("--dice_lr", type=float, default=1e-4,
                         help="Learning rate for DiCE unlearning")

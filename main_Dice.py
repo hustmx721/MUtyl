@@ -13,7 +13,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
-
+from pathlib import Path
+sys.path.append(Path(__file__).resolve().parent)
 from evaluate import evaluate
 from train import train_one_epoch
 from utils.dataset import set_seed
@@ -206,7 +207,7 @@ def dice_unlearn(
             features_f = hook.value
 
             loss_cf = kl_loss(log_p, q)
-            loss_marg = margin_suppression_loss(logits_f, y_f, config.margin)
+            loss_marg = margin_suppression_loss(logits_f, y_f.long(), config.margin)
             projection = torch.matmul(features_f, u_f)
             loss_sub = torch.mean(projection ** 2)
             loss_f = (
