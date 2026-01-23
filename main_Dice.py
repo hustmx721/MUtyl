@@ -1,0 +1,378 @@
+import copy
+import os
+import sys
+import time
+import gc
+import warnings
+from dataclasses import dataclass
+from itertools import cycle
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from tqdm import tqdm
+
+from evaluate import evaluate
+from train import train_one_epoch
+from utils.dataset import set_seed
+from utils.init_all import apply_thread_limits, init_args, set_args, load_all
+from utils.Logging import Logger
+from utils.MULoader import Load_MU_Dataloader
+
+warnings.filterwarnings("ignore")
+
+
+@dataclass
+class DiceLossConfig:
+    temperature: float
+    margin: float
+    lambda_cf: float
+    lambda_m: float
+    lambda_sub: float
+    beta_kd: float
+
+
+class FeatureHook:
+    def __init__(self, module: nn.Module, detach: bool = False) -> None:
+        self.detach = detach
+        self.value = None
+        self.handle = module.register_forward_hook(self._hook)
+
+    def _hook(self, module, inputs, output):
+        value = inputs[0]
+        if self.detach:
+            value = value.detach()
+        self.value = value
+
+    def remove(self):
+        self.handle.remove()
+
+
+def find_last_linear(model: nn.Module) -> nn.Linear:
+    last_linear = None
+    for module in model.modules():
+        if isinstance(module, nn.Linear):
+            last_linear = module
+    if last_linear is None:
+        raise ValueError("No linear layer found for feature extraction.")
+    return last_linear
+
+
+def compute_feature_mean(
+    model: nn.Module,
+    loader,
+    device: torch.device,
+    feature_module: nn.Module,
+) -> torch.Tensor:
+    model.eval()
+    hook = FeatureHook(feature_module, detach=True)
+    feature_sum = None
+    count = 0
+    with torch.no_grad():
+        for x, _ in loader:
+            x = x.to(device, non_blocking=True)
+            _ = model(x)
+            if hook.value is None:
+                raise RuntimeError("Feature hook did not capture any activations.")
+            batch_features = hook.value
+            if feature_sum is None:
+                feature_sum = torch.zeros(batch_features.shape[1], device=device)
+            feature_sum += batch_features.sum(dim=0)
+            count += batch_features.shape[0]
+    hook.remove()
+    if count == 0:
+        raise ValueError("No samples available for feature mean computation.")
+    return feature_sum / count
+
+
+def compute_unit_direction(mu_f: torch.Tensor, mu_r: torch.Tensor) -> torch.Tensor:
+    diff = mu_f - mu_r
+    norm = torch.norm(diff, p=2)
+    if norm == 0:
+        return torch.zeros_like(diff)
+    return diff / norm
+
+
+def select_counterfactual_logits(
+    logits_r: torch.Tensor,
+    y_r: torch.Tensor,
+    y_f: torch.Tensor,
+) -> torch.Tensor:
+    device = logits_r.device
+    batch_size = y_f.shape[0]
+    indices = torch.empty(batch_size, dtype=torch.long, device=device)
+    for idx, label in enumerate(y_f):
+        candidates = torch.nonzero(y_r != label, as_tuple=False).flatten()
+        if candidates.numel() == 0:
+            indices[idx] = torch.randint(0, logits_r.shape[0], (1,), device=device)
+        else:
+            rand_idx = torch.randint(0, candidates.numel(), (1,), device=device)
+            indices[idx] = candidates[rand_idx]
+    return logits_r[indices]
+
+
+def margin_suppression_loss(logits: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
+    true_logits = logits.gather(1, labels.view(-1, 1)).squeeze(1)
+    mask = torch.ones_like(logits, dtype=torch.bool)
+    mask.scatter_(1, labels.view(-1, 1), False)
+    max_other = logits.masked_fill(~mask, float("-inf")).max(dim=1).values
+    return F.relu(true_logits - max_other + margin).mean()
+
+
+def train_teacher(
+    args,
+    train_loader,
+    device: torch.device,
+) -> nn.Module:
+    model, optimizer, _ = load_all(args)
+    model.to(device)
+    torch.cuda.empty_cache()
+    torch.cuda.set_device(device)
+
+    clf_loss_func = nn.CrossEntropyLoss().to(device)
+    for epoch in tqdm(range(args.dice_teacher_epochs), desc="Teacher Training:"):
+        train_one_epoch(
+            model=model,
+            dataloader=train_loader,
+            device=device,
+            optimizer=optimizer,
+            clf_loss_func=clf_loss_func,
+        )
+    return model
+
+
+def freeze_classifier_head(model: nn.Module) -> None:
+    last_linear = find_last_linear(model)
+    for param in last_linear.parameters():
+        param.requires_grad = False
+
+
+def dice_unlearn(
+    student: nn.Module,
+    teacher: nn.Module,
+    loaders: dict,
+    u_f: torch.Tensor,
+    config: DiceLossConfig,
+    args,
+    device: torch.device,
+) -> nn.Module:
+    student = student.to(device)
+    teacher = teacher.to(device)
+    teacher.eval()
+    student.train()
+
+    if args.dice_freeze_head:
+        freeze_classifier_head(student)
+
+    optimizer = torch.optim.Adam(
+        [p for p in student.parameters() if p.requires_grad],
+        lr=args.dice_lr,
+    )
+    feature_module = find_last_linear(student)
+    hook = FeatureHook(feature_module, detach=False)
+
+    forget_loader = loaders["forget_train_loader"]
+    retain_loader = loaders["remain_train_loader"]
+    retain_cycle = cycle(retain_loader)
+
+    forget_iters = args.dice_forget_iters or len(forget_loader)
+    retain_iters = args.dice_retain_iters or len(retain_loader)
+
+    kl_loss = nn.KLDivLoss(reduction="batchmean")
+
+    for epoch in range(args.dice_unlearn_epochs):
+        student.train()
+        for step, (x_f, y_f) in enumerate(forget_loader):
+            if step >= forget_iters:
+                break
+            x_r, y_r = next(retain_cycle)
+            x_f = x_f.to(device, non_blocking=True)
+            y_f = y_f.to(device, non_blocking=True)
+            x_r = x_r.to(device, non_blocking=True)
+            y_r = y_r.to(device, non_blocking=True)
+
+            with torch.no_grad():
+                logits_r = teacher(x_r)
+                logits_r = select_counterfactual_logits(logits_r, y_r, y_f)
+                q = F.softmax(logits_r / config.temperature, dim=1)
+
+            logits_f = student(x_f)
+            log_p = F.log_softmax(logits_f / config.temperature, dim=1)
+
+            if hook.value is None:
+                raise RuntimeError("Feature hook did not capture activations for forget batch.")
+            features_f = hook.value
+
+            loss_cf = kl_loss(log_p, q)
+            loss_marg = margin_suppression_loss(logits_f, y_f, config.margin)
+            projection = torch.matmul(features_f, u_f)
+            loss_sub = torch.mean(projection ** 2)
+            loss_f = (
+                config.lambda_cf * loss_cf
+                + config.lambda_m * loss_marg
+                + config.lambda_sub * loss_sub
+            )
+
+            optimizer.zero_grad()
+            loss_f.backward()
+            optimizer.step()
+
+        student.train()
+        for step, (x_r, y_r) in enumerate(retain_loader):
+            if step >= retain_iters:
+                break
+            x_r = x_r.to(device, non_blocking=True)
+            y_r = y_r.to(device, non_blocking=True)
+
+            logits_u = student(x_r)
+            loss_ce = F.cross_entropy(logits_u, y_r)
+
+            with torch.no_grad():
+                logits_t = teacher(x_r)
+                probs_t = F.softmax(logits_t / config.temperature, dim=1)
+
+            log_probs_u = F.log_softmax(logits_u / config.temperature, dim=1)
+            loss_kd = kl_loss(log_probs_u, probs_t)
+            loss_r = loss_ce + config.beta_kd * loss_kd
+
+            optimizer.zero_grad()
+            loss_r.backward()
+            optimizer.step()
+
+        print(
+            f"Epoch {epoch + 1}/{args.dice_unlearn_epochs}: "
+            f"Forget loss {loss_f.item():.4f} | Retain loss {loss_r.item():.4f}"
+        )
+
+    hook.remove()
+    return student
+
+
+def main():
+    args = init_args()
+    args = set_args(args)
+    apply_thread_limits(getattr(args, "torch_threads", 4))
+    device = torch.device("cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu")
+
+    log_path = args.log_root / f"{args.dataset}_DiCE_{args.model}.log"
+    sys.stdout = Logger(log_path)
+
+    seeds = list(range(args.seed, args.seed + args.repeats))
+    results = np.zeros((len(seeds), 8))
+
+    for idx, seed in enumerate(seeds):
+        args.seed = seed
+        args = set_args(args)
+        start_time = time.time()
+        print("=" * 30)
+        print(f"dataset: {args.dataset}")
+        print(f"model  : {args.model}")
+        print(f"seed   : {args.seed}")
+        print(f"gpu    : {args.gpuid}")
+        print(f"is_task: {args.is_task}")
+
+        set_seed(args.seed)
+        loaders = Load_MU_Dataloader(
+            args.seed,
+            args.dataset,
+            batchsize=args.bs,
+            is_task=args.is_task,
+            forget_subject=args.forget_subject,
+        )
+        print("=====================data are prepared===============")
+        print(f"累计用时{time.time() - start_time:.4f}s!")
+        print(f"Forget subject: {loaders['forget_subject']}")
+
+        teacher = train_teacher(args, loaders["train_loader"], device)
+        feature_module = find_last_linear(teacher)
+        mu_f = compute_feature_mean(
+            teacher,
+            loaders["forget_train_loader"],
+            device,
+            feature_module,
+        )
+        mu_r = compute_feature_mean(
+            teacher,
+            loaders["remain_train_loader"],
+            device,
+            feature_module,
+        )
+        u_f = compute_unit_direction(mu_f, mu_r).to(device)
+
+        student = copy.deepcopy(teacher)
+        loss_config = DiceLossConfig(
+            temperature=args.dice_temperature,
+            margin=args.dice_margin,
+            lambda_cf=args.dice_lambda_cf,
+            lambda_m=args.dice_lambda_m,
+            lambda_sub=args.dice_lambda_sub,
+            beta_kd=args.dice_beta_kd,
+        )
+        student = dice_unlearn(student, teacher, loaders, u_f, loss_config, args, device)
+
+        model_path = args.model_root / f"{args.dataset}"
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
+        torch.save(
+            student.state_dict(),
+            model_path / f"DiCE_{args.model}_{args.seed}.pth",
+        )
+
+        retain_metrics = evaluate(student, loaders["test_loader_remain"], args, device)
+        forget_metrics = evaluate(student, loaders["test_loader_forget"], args, device)
+
+        results[idx] = [
+            retain_metrics[1],
+            retain_metrics[2],
+            retain_metrics[3],
+            retain_metrics[4],
+            forget_metrics[1],
+            forget_metrics[2],
+            forget_metrics[3],
+            forget_metrics[4],
+        ]
+        print(
+            "Retain Test  Acc:{:.2f}% F1:{:.2f}% BCA:{:.2f}% EER:{:.2f}%".format(
+                retain_metrics[1] * 100,
+                retain_metrics[2] * 100,
+                retain_metrics[3] * 100,
+                retain_metrics[4] * 100,
+            )
+        )
+        print(
+            "Forget Test  Acc:{:.2f}% F1:{:.2f}% BCA:{:.2f}% EER:{:.2f}%".format(
+                forget_metrics[1] * 100,
+                forget_metrics[2] * 100,
+                forget_metrics[3] * 100,
+                forget_metrics[4] * 100,
+            )
+        )
+        print("=====================unlearning done===================")
+        print(f"累计用时{time.time() - start_time:.4f}s!")
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    df = pd.DataFrame(
+        results,
+        columns=[
+            "Retain_Acc",
+            "Retain_F1",
+            "Retain_BCA",
+            "Retain_EER",
+            "Forget_Acc",
+            "Forget_F1",
+            "Forget_BCA",
+            "Forget_EER",
+        ],
+        index=[str(seed) for seed in seeds],
+    ).round(4)
+    csv_path = args.csv_root / f"{args.dataset}"
+    if not os.path.exists(csv_path):
+        os.makedirs(csv_path)
+    df.to_csv(csv_path / f"DiCE_{args.model}.csv")
+
+
+if __name__ == "__main__":
+    main()
