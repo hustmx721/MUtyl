@@ -32,6 +32,32 @@ def init_args():
     parser.add_argument("--is_task", type=bool, default=True)
     parser.add_argument("--torch_threads", type=int, default=4,
                         help="Number of threads to use for torch operations")
+    parser.add_argument("--forget_subject", type=int, default=None,
+                        help="Subject ID to forget for MU splits (default: random)")
+    parser.add_argument("--dice_teacher_epochs", type=int, default=100,
+                        help="Number of epochs to train the DiCE teacher")
+    parser.add_argument("--dice_unlearn_epochs", type=int, default=30,
+                        help="Number of epochs for DiCE unlearning")
+    parser.add_argument("--dice_lr", type=float, default=1e-4,
+                        help="Learning rate for DiCE unlearning")
+    parser.add_argument("--dice_temperature", type=float, default=1.0,
+                        help="Temperature for DiCE softmax")
+    parser.add_argument("--dice_margin", type=float, default=0.5,
+                        help="Margin for DiCE true-class suppression")
+    parser.add_argument("--dice_lambda_cf", type=float, default=1.0,
+                        help="Weight for counterfactual distillation loss")
+    parser.add_argument("--dice_lambda_m", type=float, default=1.0,
+                        help="Weight for margin suppression loss")
+    parser.add_argument("--dice_lambda_sub", type=float, default=1.0,
+                        help="Weight for subspace regularization loss")
+    parser.add_argument("--dice_beta_kd", type=float, default=1.0,
+                        help="Weight for retain KD loss")
+    parser.add_argument("--dice_forget_iters", type=int, default=0,
+                        help="Forget iterations per epoch (0 uses full forget loader)")
+    parser.add_argument("--dice_retain_iters", type=int, default=0,
+                        help="Retain iterations per epoch (0 uses full retain loader)")
+    parser.add_argument("--dice_freeze_head", action="store_true",
+                        help="Freeze the classifier head during DiCE unlearning")
     # logs path
     parser.add_argument("--log_root", type=Path, default=default_log_root,
                         help="Directory to store training logs")
