@@ -122,13 +122,13 @@ class EEGNet(nn.Module):
         
         self.clf = Classifier(input_size=self.f2 * (self.samples // (4 * 8)), output_size=self.classes_num)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor):
         x = self.block1(x) 
         x = self.block2(x)
         x = self.block3(x) 
         x = x.view(x.size(0),-1)
         out = self.clf(x)
-        return out
+        return x, out # features and logits
     
     # 网络输出预测熵
     def pred_ent(self,x):
@@ -179,13 +179,13 @@ class DeepConvNet(nn.Module):
         self.convT = CalculateOutSize(nn.Sequential(self.block1,self.block2,self.block3),self.Chans,self.Samples)
         self.clf = Classifier(input_size=self.convT*d3, output_size=self.classes_num) 
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor):
         output = self.block1(x)
         output = self.block2(output)
         output = self.block3(output)
         output = output.reshape(output.size(0), -1)
         out = self.clf(output)
-        return out
+        return output, out # features and logits
 
     def MaxNormConstraint(self):
         for block in [self.block1, self.block2, self.block3]:
@@ -239,11 +239,11 @@ class ShallowConvNet(nn.Module):
         self.convT = CalculateOutSize(self.block1,self.Chans,self.Samples)
         self.clf = Classifier(input_size=self.convT*midDim, output_size=self.classes_num) 
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor):
         output = self.block1(x)
         output = output.reshape(output.size(0), -1)
         out = self.clf(output)
-        return out
+        return output, out # features and logits
 
     def MaxNormConstraint(self):
         for n, p in self.block1.named_parameters():
@@ -302,7 +302,7 @@ class CNN_LSTM(nn.Module):
                                  nn.Linear(in_features=self.hidden_size, out_features=self.n_classes))
         
     
-    def forward(self,x:torch.Tensor)-> torch.Tensor:
+    def forward(self,x:torch.Tensor):
         # X (batch_size,1,channels,time_points) = (B,1,C,T)
         x = self.block1(x) # (B,spatial_num,1,T//2)
         x = self.block2(x) # (B,2*spatial_num,1,T//4)
@@ -310,7 +310,7 @@ class CNN_LSTM(nn.Module):
         x = x.reshape(x.shape[0],-1,8*self.convT) # (32,16,1000) # (B,spatial_num//2,T) 
         x, _ = self.lstm(x) # (B,spatial_num//2,hidden_size) eg:(32,16,192)
         x = x.reshape(x.shape[0],-1)
-        return self.clf(x)
+        return x, self.clf(x) # features and logits
 
 from data_loader import SubBandSplit
 #%% Support classes for FBNet Implementation
@@ -435,7 +435,7 @@ class BrainprintNet(nn.Module):
         out = torch.flatten(out, start_dim=1)
 
         features = out
-        return self.fc(features)
+        return features,self.fc(features) # features and logits
     
 
 
@@ -497,5 +497,5 @@ class MSNet(nn.Module):
         out = torch.flatten(out, start_dim=1)
 
         features = out
-        return self.fc(features)
+        return features, self.fc(features) # features and logits
     
