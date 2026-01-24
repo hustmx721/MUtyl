@@ -15,7 +15,6 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from pathlib import Path
 sys.path.append(Path(__file__).resolve().parent)
-from evaluate import evaluate
 from train import train_one_epoch
 from utils.dataset import set_seed
 from utils.init_all import apply_thread_limits, init_args, set_args, load_all
@@ -120,6 +119,84 @@ def margin_suppression_loss(logits: torch.Tensor, labels: torch.Tensor, margin: 
     mask.scatter_(1, labels.view(-1, 1), False)
     max_other = logits.masked_fill(~mask, float("-inf")).max(dim=1).values
     return F.relu(true_logits - max_other + margin).mean()
+
+
+def calculate_acc_f1(labels: torch.Tensor, logits: torch.Tensor):
+    if labels.numel() == 0:
+        return float("nan"), float("nan")
+
+    preds = logits.argmax(dim=1)
+    correct = (preds == labels).sum().float()
+    accuracy = correct / labels.numel()
+
+    num_classes = logits.shape[1]
+    labels_one_hot = F.one_hot(labels.long(), num_classes=num_classes).to(logits.dtype)
+    preds_one_hot = F.one_hot(preds, num_classes=num_classes).to(logits.dtype)
+
+    true_positives = (labels_one_hot * preds_one_hot).sum(dim=0)
+    support = labels_one_hot.sum(dim=0)
+    predicted_support = preds_one_hot.sum(dim=0)
+    false_positives = predicted_support - true_positives
+    false_negatives = support - true_positives
+
+    precision_denom = true_positives + false_positives
+    recall_denom = true_positives + false_negatives
+
+    precision = torch.where(
+        precision_denom > 0, true_positives / precision_denom, torch.zeros_like(true_positives)
+    )
+    recall = torch.where(
+        recall_denom > 0, true_positives / recall_denom, torch.zeros_like(true_positives)
+    )
+
+    f1_denom = precision + recall
+    f1_per_class = torch.where(
+        f1_denom > 0, 2 * precision * recall / f1_denom, torch.zeros_like(f1_denom)
+    )
+
+    total_support = support.sum()
+    if total_support.item() > 0:
+        f1_weighted = (f1_per_class * support).sum() / total_support
+    else:
+        f1_weighted = torch.tensor(float("nan"), device=logits.device)
+
+    return accuracy.item(), f1_weighted.item()
+
+
+def evaluate_acc_f1(model, dataloader, args=None, device=None):
+    model.eval()
+
+    if len(dataloader.dataset) == 0:
+        print("Warning: Evaluation dataloader is empty.")
+        return float("nan"), float("nan")
+
+    if device is None:
+        if args is not None:
+            device = torch.device(
+                "cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu"
+            )
+        else:
+            device = next(model.parameters()).device
+
+    all_logits = []
+    all_labels = []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            if len(batch) == 3:
+                x, y, _ = batch
+            else:
+                x, y = batch
+            x, y = x.to(device), y.to(device)
+            y = y.long()
+            logits = model(x)
+            all_logits.append(logits.detach())
+            all_labels.append(y.detach())
+
+    all_logits_cat = torch.cat(all_logits, dim=0)
+    all_labels_cat = torch.cat(all_labels, dim=0)
+
+    return calculate_acc_f1(all_labels_cat, all_logits_cat)
 
 
 def train_teacher(
@@ -261,7 +338,7 @@ def main():
     sys.stdout = Logger(log_path)
 
     seeds = list(range(args.seed, args.seed + args.repeats))
-    results = np.zeros((len(seeds), 8))
+    results = np.zeros((len(seeds), 4))
 
     for idx, seed in enumerate(seeds):
         args.seed = seed
@@ -321,33 +398,29 @@ def main():
             model_path / f"DiCE_{args.model}_{args.seed}.pth",
         )
 
-        retain_metrics = evaluate(student, loaders["test_loader_remain"], args, device)
-        forget_metrics = evaluate(student, loaders["test_loader_forget"], args, device)
+        retain_acc, retain_f1 = evaluate_acc_f1(
+            student, loaders["test_loader_remain"], args, device
+        )
+        forget_acc, forget_f1 = evaluate_acc_f1(
+            student, loaders["test_loader_forget"], args, device
+        )
 
         results[idx] = [
-            retain_metrics[1],
-            retain_metrics[2],
-            retain_metrics[3],
-            retain_metrics[4],
-            forget_metrics[1],
-            forget_metrics[2],
-            forget_metrics[3],
-            forget_metrics[4],
+            retain_acc,
+            retain_f1,
+            forget_acc,
+            forget_f1,
         ]
         print(
-            "Retain Test  Acc:{:.2f}% F1:{:.2f}% BCA:{:.2f}% EER:{:.2f}%".format(
-                retain_metrics[1] * 100,
-                retain_metrics[2] * 100,
-                retain_metrics[3] * 100,
-                retain_metrics[4] * 100,
+            "Retain Test  Acc:{:.2f}% F1:{:.2f}%".format(
+                retain_acc * 100,
+                retain_f1 * 100,
             )
         )
         print(
-            "Forget Test  Acc:{:.2f}% F1:{:.2f}% BCA:{:.2f}% EER:{:.2f}%".format(
-                forget_metrics[1] * 100,
-                forget_metrics[2] * 100,
-                forget_metrics[3] * 100,
-                forget_metrics[4] * 100,
+            "Forget Test  Acc:{:.2f}% F1:{:.2f}%".format(
+                forget_acc * 100,
+                forget_f1 * 100,
             )
         )
         print("=====================unlearning done===================")
@@ -360,15 +433,14 @@ def main():
         columns=[
             "Retain_Acc",
             "Retain_F1",
-            "Retain_BCA",
-            "Retain_EER",
             "Forget_Acc",
             "Forget_F1",
-            "Forget_BCA",
-            "Forget_EER",
         ],
         index=[str(seed) for seed in seeds],
-    ).round(4)
+    )
+    df.loc["AVG"] = df.mean()
+    df.loc["STD"] = df.std()
+    df = df.round(4)
     csv_path = args.csv_root / f"{args.dataset}"
     if not os.path.exists(csv_path):
         os.makedirs(csv_path)
