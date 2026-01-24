@@ -338,108 +338,143 @@ def main():
     sys.stdout = Logger(log_path)
 
     seeds = list(range(args.seed, args.seed + args.repeats))
-    results = np.zeros((len(seeds), 4))
+    if args.forget_subject is not None:
+        forget_subjects = [args.forget_subject]
+    elif args.dataset in ["MI", "SSVEP", "ERP"]:
+        forget_subjects = list(range(1, 16))
+    elif args.dataset in ["001", "004"]:
+        forget_subjects = list(range(1, 10))
+    else:
+        forget_subjects = [None]
 
-    for idx, seed in enumerate(seeds):
-        args.seed = seed
-        args = set_args(args)
-        start_time = time.time()
+    metric_cols = [
+        "Retain_Acc",
+        "Retain_F1",
+        "Forget_Acc",
+        "Forget_F1",
+    ]
+    all_rows = []
+
+    for forget_subject in forget_subjects:
+        subject_rows = []
         print("=" * 30)
-        print(f"dataset: {args.dataset}")
-        print(f"model  : {args.model}")
-        print(f"seed   : {args.seed}")
-        print(f"gpu    : {args.gpuid}")
-        print(f"is_task: {args.is_task}")
+        print(f"Forget subject: {forget_subject}")
+        for seed in seeds:
+            args.seed = seed
+            args.forget_subject = forget_subject
+            args = set_args(args)
+            start_time = time.time()
+            print("=" * 30)
+            print(f"dataset: {args.dataset}")
+            print(f"model  : {args.model}")
+            print(f"seed   : {args.seed}")
+            print(f"gpu    : {args.gpuid}")
+            print(f"is_task: {args.is_task}")
 
-        set_seed(args.seed)
-        loaders = Load_MU_Dataloader(
-            args.seed,
-            args.dataset,
-            batchsize=args.bs,
-            is_task=args.is_task,
-            forget_subject=args.forget_subject,
-        )
-        print("=====================data are prepared===============")
-        print(f"累计用时{time.time() - start_time:.4f}s!")
-        print(f"Forget subject: {loaders['forget_subject']}")
-
-        teacher = train_teacher(args, loaders["train_loader"], device)
-        feature_module = find_last_linear(teacher)
-        mu_f = compute_feature_mean(
-            teacher,
-            loaders["forget_train_loader"],
-            device,
-            feature_module,
-        )
-        mu_r = compute_feature_mean(
-            teacher,
-            loaders["remain_train_loader"],
-            device,
-            feature_module,
-        )
-        u_f = compute_unit_direction(mu_f, mu_r).to(device)
-
-        student = copy.deepcopy(teacher)
-        loss_config = DiceLossConfig(
-            temperature=args.dice_temperature,
-            margin=args.dice_margin,
-            lambda_cf=args.dice_lambda_cf,
-            lambda_m=args.dice_lambda_m,
-            lambda_sub=args.dice_lambda_sub,
-            beta_kd=args.dice_beta_kd,
-        )
-        student = dice_unlearn(student, teacher, loaders, u_f, loss_config, args, device)
-
-        model_path = args.model_root / f"{args.dataset}"
-        if not os.path.exists(model_path):
-            os.makedirs(model_path)
-        torch.save(
-            student.state_dict(),
-            model_path / f"DiCE_{args.model}_{args.seed}.pth",
-        )
-
-        retain_acc, retain_f1 = evaluate_acc_f1(
-            student, loaders["test_loader_remain"], args, device
-        )
-        forget_acc, forget_f1 = evaluate_acc_f1(
-            student, loaders["test_loader_forget"], args, device
-        )
-
-        results[idx] = [
-            retain_acc,
-            retain_f1,
-            forget_acc,
-            forget_f1,
-        ]
-        print(
-            "Retain Test  Acc:{:.2f}% F1:{:.2f}%".format(
-                retain_acc * 100,
-                retain_f1 * 100,
+            set_seed(args.seed)
+            loaders = Load_MU_Dataloader(
+                args.seed,
+                args.dataset,
+                batchsize=args.bs,
+                is_task=args.is_task,
+                forget_subject=args.forget_subject,
             )
-        )
-        print(
-            "Forget Test  Acc:{:.2f}% F1:{:.2f}%".format(
-                forget_acc * 100,
-                forget_f1 * 100,
-            )
-        )
-        print("=====================unlearning done===================")
-        print(f"累计用时{time.time() - start_time:.4f}s!")
-        gc.collect()
-        torch.cuda.empty_cache()
+            print("=====================data are prepared===============")
+            print(f"累计用时{time.time() - start_time:.4f}s!")
+            print(f"Forget subject: {loaders['forget_subject']}")
 
-    df = pd.DataFrame(
-        results,
-        columns=[
-            "Retain_Acc",
-            "Retain_F1",
-            "Forget_Acc",
-            "Forget_F1",
-        ],
-        index=[str(seed) for seed in seeds],
-    )
-    df.loc["AVG"] = df.mean()
-    df.loc["STD"] = df.std()
+            teacher = train_teacher(args, loaders["train_loader"], device)
+            feature_module = find_last_linear(teacher)
+            mu_f = compute_feature_mean(
+                teacher,
+                loaders["forget_train_loader"],
+                device,
+                feature_module,
+            )
+            mu_r = compute_feature_mean(
+                teacher,
+                loaders["remain_train_loader"],
+                device,
+                feature_module,
+            )
+            u_f = compute_unit_direction(mu_f, mu_r).to(device)
+
+            student = copy.deepcopy(teacher)
+            loss_config = DiceLossConfig(
+                temperature=args.dice_temperature,
+                margin=args.dice_margin,
+                lambda_cf=args.dice_lambda_cf,
+                lambda_m=args.dice_lambda_m,
+                lambda_sub=args.dice_lambda_sub,
+                beta_kd=args.dice_beta_kd,
+            )
+            student = dice_unlearn(student, teacher, loaders, u_f, loss_config, args, device)
+
+            model_path = args.model_root / f"{args.dataset}"
+            if not os.path.exists(model_path):
+                os.makedirs(model_path)
+            torch.save(
+                student.state_dict(),
+                model_path / f"DiCE_{args.model}_{args.seed}_forget{loaders['forget_subject']}.pth",
+            )
+
+            retain_acc, retain_f1 = evaluate_acc_f1(
+                student, loaders["test_loader_remain"], args, device
+            )
+            forget_acc, forget_f1 = evaluate_acc_f1(
+                student, loaders["test_loader_forget"], args, device
+            )
+
+            subject_rows.append(
+                {
+                    "Forget_Subject": loaders["forget_subject"],
+                    "Seed": seed,
+                    "Retain_Acc": retain_acc,
+                    "Retain_F1": retain_f1,
+                    "Forget_Acc": forget_acc,
+                    "Forget_F1": forget_f1,
+                }
+            )
+            print(
+                "Retain Test  Acc:{:.2f}% F1:{:.2f}%".format(
+                    retain_acc * 100,
+                    retain_f1 * 100,
+                )
+            )
+            print(
+                "Forget Test  Acc:{:.2f}% F1:{:.2f}%".format(
+                    forget_acc * 100,
+                    forget_f1 * 100,
+                )
+            )
+            print("=====================unlearning done===================")
+            print(f"累计用时{time.time() - start_time:.4f}s!")
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        subject_df = pd.DataFrame(subject_rows)
+        subject_label = (
+            subject_df["Forget_Subject"].iloc[0] if not subject_df.empty else forget_subject
+        )
+        avg_row = subject_df[metric_cols].mean()
+        std_row = subject_df[metric_cols].std()
+        subject_rows.append(
+            {
+                "Forget_Subject": subject_label,
+                "Seed": "AVG",
+                **avg_row.to_dict(),
+            }
+        )
+        subject_rows.append(
+            {
+                "Forget_Subject": subject_label,
+                "Seed": "STD",
+                **std_row.to_dict(),
+            }
+        )
+        all_rows.extend(subject_rows)
+
+    df = pd.DataFrame(all_rows, columns=["Forget_Subject", "Seed"] + metric_cols)
     df = df.round(4)
     csv_path = args.csv_root / f"{args.dataset}"
     if not os.path.exists(csv_path):
