@@ -11,6 +11,8 @@ def CalculateOutSize(model, channels, samples):
     device = next(model.parameters()).device
     x = torch.rand(1, 1, channels, samples).to(device)
     out = model(x)
+    if isinstance(out, (tuple, list)):
+        out = out[0]
     return out.shape[-1]
 
 def LoadModel(model_name, Chans, Samples, n_classes):
@@ -132,7 +134,7 @@ class EEGNet(nn.Module):
     
     # 网络输出预测熵
     def pred_ent(self,x):
-        logits = self(x)
+        _, logits = self(x)
         lsm = nn.LogSoftmax(dim=-1)
         log_probs = lsm(logits)
         probs = torch.exp(log_probs)

@@ -18,6 +18,10 @@ def train_one_epoch(model, dataloader, device, optimizer, clf_loss_func):
         b_x, b_y = b_x.to(device), b_y.to(device)
 
         output = model(b_x)
+        if isinstance(output, (tuple, list)):
+            if len(output) != 2:
+                raise ValueError("Expected model to return (features, logits).")
+            _, output = output
 
         clf_loss = clf_loss_func(output, b_y.long())
         loss = clf_loss

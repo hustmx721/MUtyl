@@ -146,13 +146,13 @@ class ESC:
                 mask.requires_grad_(True)
 
                 model.esc_set(u * mask, esc_t=True)
-                outputs = model(x)
+                _, logits = model(x)
 
-                pred = outputs.argmax(dim=1)
+                pred = logits.argmax(dim=1)
                 learned = y == pred
 
                 if learned.any():
-                    loss = -criterion(outputs[learned], y[learned])
+                    loss = -criterion(logits[learned], y[learned])
                     loss.backward()
 
                     if mask.grad is not None:
@@ -169,8 +169,8 @@ class ESC:
                 for x, y in loader:
                     x = x.to(device, non_blocking=True)
                     y = y.to(device, non_blocking=True)
-                    outputs = model(x)
-                    pred = outputs.argmax(dim=1)
+                    _, logits = model(x)
+                    pred = logits.argmax(dim=1)
                     num_hits += (y == pred).sum().item()
             if num_hits == 0:
                 break

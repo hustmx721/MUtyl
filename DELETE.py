@@ -63,13 +63,13 @@ class DELETE:
                 optimizer.zero_grad()
 
                 with torch.no_grad():
-                    pred_label = teacher(x)
+                    _, pred_label = teacher(x)
                     if self.soft_label == "inf":
                         pred_label[torch.arange(x.shape[0]), y] = -1e10
                     else:
                         raise ValueError("Unknown soft label method")
 
-                ori_logits = model(x)
+                _, ori_logits = model(x)
                 ori_logits = F.log_softmax(ori_logits, dim=1)
                 pred_label = F.softmax(pred_label, dim=1)
                 loss = criterion(ori_logits, pred_label)
