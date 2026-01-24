@@ -251,7 +251,7 @@ def GetMULoader14xxx(
                 f"train={subject_train.shape[0]}/{label1.shape[0]}, test={subject_test.shape[0]}/{label2.shape[0]}"
             )
 
-    DataProcessor = preprocessing(fs=250)
+    DataProcessor = preprocessing(fs=250, low_freq=8, high_freq=32)
     data1, data2 = [DataProcessor.EEGpipline(x) for x in [data1, data2]]
 
     data_all = np.concatenate([data1, data2], axis=0)
@@ -304,8 +304,6 @@ def GetMULoaderOpenBMI(
         test_x = data_test["ori_test_x"].astype(np.float32)
         train_y = (data_train["ori_train_s"] - 1).astype(np.int16)
         test_y = (data_test["ori_test_s"] - 1).astype(np.int16)
-        train_x, test_x = [x.reshape((-1, x.shape[-2], x.shape[-1])) for x in [train_x, test_x]]
-        train_y, test_y = [s.reshape(-1) for s in [train_y, test_y]]
         train_subject = _extract_subjects(data_train, allow_label_fallback=True)
         test_subject = _extract_subjects(data_test, allow_label_fallback=True)
 
@@ -313,6 +311,15 @@ def GetMULoaderOpenBMI(
         raise ValueError("Subject metadata is required for MU splitting but was not found in OpenBMI data.")
 
     train_x, test_x = [x.reshape((-1, x.shape[-2], x.shape[-1])) for x in [train_x, test_x]]
+    train_y, test_y = [y.reshape(-1) for y in [train_y, test_y]]
+    train_subject, test_subject = [s.reshape(-1) for s in [train_subject, test_subject]]
+
+    if train_x.shape[0] != train_subject.shape[0] or test_x.shape[0] != test_subject.shape[0]:
+        raise ValueError(
+            "OpenBMI subject metadata length mismatch: "
+            f"train={train_subject.shape[0]}/{train_x.shape[0]}, "
+            f"test={test_subject.shape[0]}/{test_x.shape[0]}"
+        )
 
     all_subjects = np.unique(np.concatenate([train_subject, test_subject], axis=0))
     keep_subjects = np.sort(all_subjects)[:15]
@@ -321,8 +328,12 @@ def GetMULoaderOpenBMI(
     train_x, train_y, train_subject = train_x[train_mask], train_y[train_mask], train_subject[train_mask]
     test_x, test_y, test_subject = test_x[test_mask], test_y[test_mask], test_subject[test_mask]
 
-    fs = 1000 if Task == "ERP" else 250
-    DataProcessor = preprocessing(fs=fs)
+    if Task == "MI":
+        DataProcessor = preprocessing(fs=250, low_freq=4, high_freq=40)
+    elif Task == "SSVEP":
+        DataProcessor = preprocessing(fs=250, low_freq=4, high_freq=64)
+    elif Task == "ERP":
+        DataProcessor = preprocessing(fs=250, low_freq=1, high_freq=40)
     processor = DataProcessor.EEGpipline
 
     train_x, test_x = [_process_in_chunks(x, processor) for x in [train_x, test_x]]
