@@ -66,6 +66,34 @@ def _extract_subjects(data_dict, allow_label_fallback=False):
     return None
 
 
+def _build_subjects_from_counts(counts, start_id=1):
+    subjects = []
+    for offset, count in enumerate(counts):
+        subjects.append(np.full(int(count), start_id + offset, dtype=int))
+    if not subjects:
+        return np.array([], dtype=int)
+    return np.concatenate(subjects, axis=0)
+
+
+def _get_mat_subjects(data_dict, keys, expected_len):
+    for key in keys:
+        if key in data_dict:
+            subjects = np.asarray(data_dict[key]).reshape(-1)
+            return subjects if subjects.shape[0] == expected_len else None
+    return None
+
+
+def _get_fallback_counts(split):
+    if split == "001":
+        return {"train": [288] * 9, "test": [288] * 9}
+    if split == "004":
+        return {
+            "train": [400, 400, 400, 420, 420, 400, 400, 440, 400],
+            "test": [320, 280, 320, 320, 320, 320, 320, 320, 320],
+        }
+    return None
+
+
 def _split_by_subject_session(subjects, sessions, seed, forget_subject=None):
     set_seed(seed)
     subjects = np.asarray(subjects).reshape(-1)
@@ -200,26 +228,35 @@ def GetMULoader14xxx(
         label1, label2 = data["ori_test_x"], data["ori_test_s"]
     label1, label2 = [label.squeeze() for label in [label1, label2]]
 
-    subject1 = None
-    subject2 = None
-    for key in ["ori_train_s", "train_s", "subject_train", "subjects_train"]:
-        if key in data:
-            subject1 = np.asarray(data[key]).reshape(-1)
-            break
-    for key in ["ori_test_s", "test_s", "subject_test", "subjects_test"]:
-        if key in data:
-            subject2 = np.asarray(data[key]).reshape(-1)
-            break
+    subject_train = _get_mat_subjects(
+        data,
+        ["ori_train_s", "train_s", "subject_train", "subjects_train"],
+        expected_len=label1.shape[0],
+    )
+    subject_test = _get_mat_subjects(
+        data,
+        ["ori_test_s", "test_s", "subject_test", "subjects_test"],
+        expected_len=label2.shape[0],
+    )
 
-    if subject1 is None or subject2 is None:
-        raise ValueError("Subject metadata is required for MU splitting but was not found in the .mat file.")
+    if subject_train is None or subject_test is None:
+        fallback_counts = _get_fallback_counts(split)
+        if fallback_counts is None:
+            raise ValueError("Subject metadata is required for MU splitting but was not found in the .mat file.")
+        subject_train = subject_train or _build_subjects_from_counts(fallback_counts["train"], start_id=1)
+        subject_test = subject_test or _build_subjects_from_counts(fallback_counts["test"], start_id=1)
+        if subject_train.shape[0] != label1.shape[0] or subject_test.shape[0] != label2.shape[0]:
+            raise ValueError(
+                f"Subject fallback counts do not match data sizes for split={split}: "
+                f"train={subject_train.shape[0]}/{label1.shape[0]}, test={subject_test.shape[0]}/{label2.shape[0]}"
+            )
 
     DataProcessor = preprocessing(fs=250)
     data1, data2 = [DataProcessor.EEGpipline(x) for x in [data1, data2]]
 
     data_all = np.concatenate([data1, data2], axis=0)
     label_all = np.concatenate([label1, label2], axis=0)
-    subject_all = np.concatenate([subject1, subject2], axis=0)
+    subject_all = np.concatenate([subject_train, subject_test], axis=0)
     session_all = np.concatenate([np.ones(len(label1)), np.ones(len(label2)) * 2], axis=0)
 
     print(f"MU split: dataset={split}, forget-subject selected from {len(np.unique(subject_all))} subjects")
@@ -276,6 +313,13 @@ def GetMULoaderOpenBMI(
         raise ValueError("Subject metadata is required for MU splitting but was not found in OpenBMI data.")
 
     train_x, test_x = [x.reshape((-1, x.shape[-2], x.shape[-1])) for x in [train_x, test_x]]
+
+    all_subjects = np.unique(np.concatenate([train_subject, test_subject], axis=0))
+    keep_subjects = np.sort(all_subjects)[:15]
+    train_mask = np.isin(train_subject, keep_subjects)
+    test_mask = np.isin(test_subject, keep_subjects)
+    train_x, train_y, train_subject = train_x[train_mask], train_y[train_mask], train_subject[train_mask]
+    test_x, test_y, test_subject = test_x[test_mask], test_y[test_mask], test_subject[test_mask]
 
     fs = 1000 if Task == "ERP" else 250
     DataProcessor = preprocessing(fs=fs)
