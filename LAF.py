@@ -31,7 +31,7 @@ class LAF:
     2) updating the feature extractor with reconstruction + contrastive losses,
     3) refining the classifier head with remaining data.
 
-    The model is expected to return (logits, embedding) in its forward pass.
+    The model is expected to return (features, logits) in its forward pass.
     """
 
     def __init__(self, config: LAFConfig | None = None) -> None:
@@ -108,7 +108,7 @@ class LAF:
             for x, _ in loader:
                 x = x.to(device, non_blocking=True)
 
-                _, embedding = trained_model(x)
+                embedding, _ = trained_model(x)
                 optimizer.zero_grad()
                 e_out, _, mu, sigma = vae(embedding)
                 loss = self._vae_loss_function(e_out, embedding, mu, sigma)
@@ -175,10 +175,10 @@ class LAF:
                 u_data = u_data.to(device, non_blocking=True)
                 s_data = s_data.to(device, non_blocking=True)
 
-                _, s_e = trained_model(s_data)
+                s_e, _ = trained_model(s_data)
                 s_e_out, _, _, _ = s_vae(s_e)
 
-                _, u_e = trained_model(u_data)
+                u_e, _ = trained_model(u_data)
                 u_u_e_out, _, _, _ = u_vae(u_e)
 
                 loss2 = self._extractor_loss_nmse(s_e_out, s_e) - self._extractor_loss_nmse(u_u_e_out, u_e)
@@ -187,10 +187,10 @@ class LAF:
                 loss2.backward()
                 optimizer1.step()
 
-                _, s_e = trained_model(s_data)
-                _, s_e_teacher = teacher_model(s_data)
-                _, u_e = trained_model(u_data)
-                _, u_e_teacher = teacher_model(u_data)
+                s_e, _ = trained_model(s_data)
+                s_e_teacher, _ = teacher_model(s_data)
+                u_e, _ = trained_model(u_data)
+                u_e_teacher, _ = teacher_model(u_data)
 
                 loss3 = self._extractor_loss_cosine(
                     s_e,
@@ -239,7 +239,7 @@ class LAF:
             for (_, _), (x, y) in zip(loaders["unlearn"], remain_loader):
                 x = x.to(device, non_blocking=True)
                 y = y.to(device, non_blocking=True)
-                y_out, _ = trained_model(x)
+                _, y_out = trained_model(x)
                 loss = loss_func(y_out, y)
 
                 optimizer.zero_grad()

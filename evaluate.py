@@ -91,6 +91,15 @@ def calculate_metrics(labels: torch.Tensor, logits: torch.Tensor):
     return accuracy.item(), f1_weighted.item(), bca.item(), eer
 
 
+def _unpack_logits(output):
+    if isinstance(output, (tuple, list)):
+        if len(output) != 2:
+            raise ValueError("Expected model to return (features, logits).")
+        _, logits = output
+        return logits
+    return output
+
+
 def evaluate(model, dataloader, args=None, device=None):
     model.eval()
     total_loss = 0.0
@@ -121,7 +130,7 @@ def evaluate(model, dataloader, args=None, device=None):
                 x, y = batch
             x, y = x.to(device), y.to(device)
             y = y.long()
-            logits = model(x)
+            logits = _unpack_logits(model(x))
             loss = clf_loss_func(logits, y)
 
             total_loss += loss.item()

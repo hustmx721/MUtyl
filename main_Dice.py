@@ -34,22 +34,6 @@ class DiceLossConfig:
     beta_kd: float
 
 
-class FeatureHook:
-    def __init__(self, module: nn.Module, detach: bool = False) -> None:
-        self.detach = detach
-        self.value = None
-        self.handle = module.register_forward_hook(self._hook)
-
-    def _hook(self, module, inputs, output):
-        value = inputs[0]
-        if self.detach:
-            value = value.detach()
-        self.value = value
-
-    def remove(self):
-        self.handle.remove()
-
-
 def find_last_linear(model: nn.Module) -> nn.Linear:
     last_linear = None
     for module in model.modules():
@@ -60,28 +44,31 @@ def find_last_linear(model: nn.Module) -> nn.Linear:
     return last_linear
 
 
+def _unpack_features_logits(output):
+    if isinstance(output, (tuple, list)):
+        if len(output) != 2:
+            raise ValueError("Expected model to return (features, logits).")
+        return output
+    raise ValueError("Expected model to return (features, logits).")
+
+
 def compute_feature_mean(
     model: nn.Module,
     loader,
     device: torch.device,
-    feature_module: nn.Module,
 ) -> torch.Tensor:
     model.eval()
-    hook = FeatureHook(feature_module, detach=True)
     feature_sum = None
     count = 0
     with torch.no_grad():
         for x, _ in loader:
             x = x.to(device, non_blocking=True)
-            _ = model(x)
-            if hook.value is None:
-                raise RuntimeError("Feature hook did not capture any activations.")
-            batch_features = hook.value
+            features, _ = _unpack_features_logits(model(x))
+            batch_features = features.detach()
             if feature_sum is None:
                 feature_sum = torch.zeros(batch_features.shape[1], device=device)
             feature_sum += batch_features.sum(dim=0)
             count += batch_features.shape[0]
-    hook.remove()
     if count == 0:
         raise ValueError("No samples available for feature mean computation.")
     return feature_sum / count
@@ -189,7 +176,7 @@ def evaluate_acc_f1(model, dataloader, args=None, device=None):
                 x, y = batch
             x, y = x.to(device), y.to(device)
             y = y.long()
-            logits = model(x)
+            _, logits = _unpack_features_logits(model(x))
             all_logits.append(logits.detach())
             all_labels.append(y.detach())
 
@@ -248,9 +235,6 @@ def dice_unlearn(
         [p for p in student.parameters() if p.requires_grad],
         lr=args.dice_lr,
     )
-    feature_module = find_last_linear(student)
-    hook = FeatureHook(feature_module, detach=False)
-
     forget_loader = loaders["forget_train_loader"]
     retain_loader = loaders["remain_train_loader"]
     retain_cycle = cycle(retain_loader)
@@ -272,16 +256,12 @@ def dice_unlearn(
             y_r = y_r.to(device, non_blocking=True)
 
             with torch.no_grad():
-                logits_r = teacher(x_r)
+                _, logits_r = _unpack_features_logits(teacher(x_r))
                 logits_r = select_counterfactual_logits(logits_r, y_r, y_f)
                 q = F.softmax(logits_r / config.temperature, dim=1)
 
-            logits_f = student(x_f)
+            features_f, logits_f = _unpack_features_logits(student(x_f))
             log_p = F.log_softmax(logits_f / config.temperature, dim=1)
-
-            if hook.value is None:
-                raise RuntimeError("Feature hook did not capture activations for forget batch.")
-            features_f = hook.value
 
             loss_cf = kl_loss(log_p, q)
             loss_marg = margin_suppression_loss(logits_f, y_f.long(), config.margin)
@@ -304,11 +284,11 @@ def dice_unlearn(
             x_r = x_r.to(device, non_blocking=True)
             y_r = y_r.to(device, non_blocking=True)
 
-            logits_u = student(x_r)
+            _, logits_u = _unpack_features_logits(student(x_r))
             loss_ce = F.cross_entropy(logits_u, y_r)
 
             with torch.no_grad():
-                logits_t = teacher(x_r)
+                _, logits_t = _unpack_features_logits(teacher(x_r))
                 probs_t = F.softmax(logits_t / config.temperature, dim=1)
 
             log_probs_u = F.log_softmax(logits_u / config.temperature, dim=1)
@@ -324,7 +304,6 @@ def dice_unlearn(
             f"Forget loss {loss_f.item():.4f} | Retain loss {loss_r.item():.4f}"
         )
 
-    hook.remove()
     return student
 
 
@@ -384,18 +363,15 @@ def main():
             print(f"Forget subject: {loaders['forget_subject']}")
 
             teacher = train_teacher(args, loaders["train_loader"], device)
-            feature_module = find_last_linear(teacher)
             mu_f = compute_feature_mean(
                 teacher,
                 loaders["forget_train_loader"],
                 device,
-                feature_module,
             )
             mu_r = compute_feature_mean(
                 teacher,
                 loaders["remain_train_loader"],
                 device,
-                feature_module,
             )
             u_f = compute_unit_direction(mu_f, mu_r).to(device)
 
