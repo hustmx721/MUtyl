@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # Batch runner for DiCE unlearning with leave-one-subject-out (LOOCV) splits.
-# Runs datasets 001 and 004, forgetting one subject at a time.
+# Runs datasets 001, 004, and OpenBMI, forgetting one subject at a time.
 
-echo "DiCE LOOCV experiments (datasets: 001, 004)"
+echo "DiCE LOOCV experiments (datasets: 001, 004, OpenBMI)"
 
-datasets=("001" "004")
+datasets=("001" "004" "MI" "SSVEP" "ERP")
+models=("EEGNet")
+# models=("DeepConvNet" "EEGNet" "ShallowConvNet")
 # Update this list if subject IDs differ in your .mat metadata.
-subjects=(0 1 2 3 4 5 6 7 8)
 gpus=(1 2 3 4 5 6)
 
 max_jobs=12
@@ -35,18 +36,18 @@ wait_one() {
 }
 
 for dataset in "${datasets[@]}"; do
-  for forget_subject in "${subjects[@]}"; do
+  for model in "${models[@]}"; do
     gpu_id=${gpus[$(( job_idx % ${#gpus[@]} ))]}
     job_idx=$((job_idx + 1))
 
-    echo "Launch: dataset=${dataset}, forget_subject=${forget_subject}, gpu=${gpu_id}"
+    echo "Launch: dataset=${dataset}, model=${model}, gpu=${gpu_id}"
     python -u main_Dice.py \
       --dataset "${dataset}" \
+      --model "${model}" \
       --gpuid "${gpu_id}" \
       --is_task True \
       --repeats 3 \
-      --seed 2024 \
-      --forget_subject "${forget_subject}" &
+      --seed 2024 &
 
     pid=$!
     jobs+=("$pid")

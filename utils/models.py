@@ -401,7 +401,7 @@ class BrainprintNet(nn.Module):
         self.temporalLayer = temporal_layer[temporalLayer](dim=-1)
 
         
-        self.fc = nn.Sequential(
+        self.clf = nn.Sequential(
             nn.Linear(in_features=nbands*radix*strideFactor, out_features=num_classes),
             nn.LogSoftmax(dim=1)
         )
@@ -437,7 +437,7 @@ class BrainprintNet(nn.Module):
         out = torch.flatten(out, start_dim=1)
 
         features = out
-        return features,self.fc(features) # features and logits
+        return features,self.clf(features) # features and logits
     
 
 
@@ -470,7 +470,7 @@ class MSNet(nn.Module):
         self.temporalLayer = temporal_layer[temporalLayer](dim=-1)
 
         # self.fc = nn.Linear(in_features=self.planes*strideFactor, out_features=num_classes)
-        self.fc = nn.Sequential(
+        self.clf = nn.Sequential(
             nn.Linear(in_features=self.planes*strideFactor, out_features=num_classes),
             nn.LogSoftmax(dim=1)
         )
@@ -499,5 +499,5 @@ class MSNet(nn.Module):
         out = torch.flatten(out, start_dim=1)
 
         features = out
-        return features, self.fc(features) # features and logits
+        return features, self.clf(features) # features and logits
     

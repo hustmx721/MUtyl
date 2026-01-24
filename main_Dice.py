@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from pathlib import Path
 sys.path.append(Path(__file__).resolve().parent)
+from evaluate import evaluate_acc_f1, calculate_acc_f1
 from train import train_one_epoch
 from utils.dataset import set_seed
 from utils.init_all import apply_thread_limits, init_args, set_args, load_all
@@ -32,16 +33,6 @@ class DiceLossConfig:
     lambda_m: float
     lambda_sub: float
     beta_kd: float
-
-
-def find_last_linear(model: nn.Module) -> nn.Linear:
-    last_linear = None
-    for module in model.modules():
-        if isinstance(module, nn.Linear):
-            last_linear = module
-    if last_linear is None:
-        raise ValueError("No linear layer found for feature extraction.")
-    return last_linear
 
 
 def _unpack_features_logits(output):
@@ -108,84 +99,6 @@ def margin_suppression_loss(logits: torch.Tensor, labels: torch.Tensor, margin: 
     return F.relu(true_logits - max_other + margin).mean()
 
 
-def calculate_acc_f1(labels: torch.Tensor, logits: torch.Tensor):
-    if labels.numel() == 0:
-        return float("nan"), float("nan")
-
-    preds = logits.argmax(dim=1)
-    correct = (preds == labels).sum().float()
-    accuracy = correct / labels.numel()
-
-    num_classes = logits.shape[1]
-    labels_one_hot = F.one_hot(labels.long(), num_classes=num_classes).to(logits.dtype)
-    preds_one_hot = F.one_hot(preds, num_classes=num_classes).to(logits.dtype)
-
-    true_positives = (labels_one_hot * preds_one_hot).sum(dim=0)
-    support = labels_one_hot.sum(dim=0)
-    predicted_support = preds_one_hot.sum(dim=0)
-    false_positives = predicted_support - true_positives
-    false_negatives = support - true_positives
-
-    precision_denom = true_positives + false_positives
-    recall_denom = true_positives + false_negatives
-
-    precision = torch.where(
-        precision_denom > 0, true_positives / precision_denom, torch.zeros_like(true_positives)
-    )
-    recall = torch.where(
-        recall_denom > 0, true_positives / recall_denom, torch.zeros_like(true_positives)
-    )
-
-    f1_denom = precision + recall
-    f1_per_class = torch.where(
-        f1_denom > 0, 2 * precision * recall / f1_denom, torch.zeros_like(f1_denom)
-    )
-
-    total_support = support.sum()
-    if total_support.item() > 0:
-        f1_weighted = (f1_per_class * support).sum() / total_support
-    else:
-        f1_weighted = torch.tensor(float("nan"), device=logits.device)
-
-    return accuracy.item(), f1_weighted.item()
-
-
-def evaluate_acc_f1(model, dataloader, args=None, device=None):
-    model.eval()
-
-    if len(dataloader.dataset) == 0:
-        print("Warning: Evaluation dataloader is empty.")
-        return float("nan"), float("nan")
-
-    if device is None:
-        if args is not None:
-            device = torch.device(
-                "cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu"
-            )
-        else:
-            device = next(model.parameters()).device
-
-    all_logits = []
-    all_labels = []
-
-    with torch.no_grad():
-        for batch in dataloader:
-            if len(batch) == 3:
-                x, y, _ = batch
-            else:
-                x, y = batch
-            x, y = x.to(device), y.to(device)
-            y = y.long()
-            _, logits = _unpack_features_logits(model(x))
-            all_logits.append(logits.detach())
-            all_labels.append(y.detach())
-
-    all_logits_cat = torch.cat(all_logits, dim=0)
-    all_labels_cat = torch.cat(all_labels, dim=0)
-
-    return calculate_acc_f1(all_labels_cat, all_logits_cat)
-
-
 def train_teacher(
     args,
     train_loader,
@@ -209,8 +122,8 @@ def train_teacher(
 
 
 def freeze_classifier_head(model: nn.Module) -> None:
-    last_linear = find_last_linear(model)
-    for param in last_linear.parameters():
+    clf = model.clf
+    for param in clf.parameters():
         param.requires_grad = False
 
 
@@ -285,7 +198,7 @@ def dice_unlearn(
             y_r = y_r.to(device, non_blocking=True)
 
             _, logits_u = _unpack_features_logits(student(x_r))
-            loss_ce = F.cross_entropy(logits_u, y_r)
+            # loss_ce = F.cross_entropy(logits_u, y_r)
 
             with torch.no_grad():
                 _, logits_t = _unpack_features_logits(teacher(x_r))
@@ -293,7 +206,7 @@ def dice_unlearn(
 
             log_probs_u = F.log_softmax(logits_u / config.temperature, dim=1)
             loss_kd = kl_loss(log_probs_u, probs_t)
-            loss_r = loss_ce + config.beta_kd * loss_kd
+            loss_r = config.beta_kd * loss_kd
 
             optimizer.zero_grad()
             loss_r.backward()
@@ -310,7 +223,7 @@ def dice_unlearn(
 def main():
     args = init_args()
     args = set_args(args)
-    apply_thread_limits(getattr(args, "torch_threads", 4))
+    apply_thread_limits(getattr(args, "torch_threads", 5))
     device = torch.device("cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu")
 
     log_path = args.log_root / f"{args.dataset}_DiCE_{args.model}.log"
@@ -320,9 +233,9 @@ def main():
     if args.forget_subject is not None:
         forget_subjects = [args.forget_subject]
     elif args.dataset in ["MI", "SSVEP", "ERP"]:
-        forget_subjects = list(range(1, 16))
+        forget_subjects = list(range(0, 15))
     elif args.dataset in ["001", "004"]:
-        forget_subjects = list(range(1, 10))
+        forget_subjects = list(range(0, 9))
     else:
         forget_subjects = [None]
 

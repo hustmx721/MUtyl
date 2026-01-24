@@ -145,3 +145,81 @@ def evaluate(model, dataloader, args=None, device=None):
     accuracy, f1, bca, eer = calculate_metrics(all_labels_cat, all_logits_cat)
 
     return avg_loss, accuracy, f1, bca, eer
+
+
+def calculate_acc_f1(labels: torch.Tensor, logits: torch.Tensor):
+    if labels.numel() == 0:
+        return float("nan"), float("nan")
+
+    preds = logits.argmax(dim=1)
+    correct = (preds == labels).sum().float()
+    accuracy = correct / labels.numel()
+
+    num_classes = logits.shape[1]
+    labels_one_hot = F.one_hot(labels.long(), num_classes=num_classes).to(logits.dtype)
+    preds_one_hot = F.one_hot(preds, num_classes=num_classes).to(logits.dtype)
+
+    true_positives = (labels_one_hot * preds_one_hot).sum(dim=0)
+    support = labels_one_hot.sum(dim=0)
+    predicted_support = preds_one_hot.sum(dim=0)
+    false_positives = predicted_support - true_positives
+    false_negatives = support - true_positives
+
+    precision_denom = true_positives + false_positives
+    recall_denom = true_positives + false_negatives
+
+    precision = torch.where(
+        precision_denom > 0, true_positives / precision_denom, torch.zeros_like(true_positives)
+    )
+    recall = torch.where(
+        recall_denom > 0, true_positives / recall_denom, torch.zeros_like(true_positives)
+    )
+
+    f1_denom = precision + recall
+    f1_per_class = torch.where(
+        f1_denom > 0, 2 * precision * recall / f1_denom, torch.zeros_like(f1_denom)
+    )
+
+    total_support = support.sum()
+    if total_support.item() > 0:
+        f1_weighted = (f1_per_class * support).sum() / total_support
+    else:
+        f1_weighted = torch.tensor(float("nan"), device=logits.device)
+
+    return accuracy.item(), f1_weighted.item()
+
+
+def evaluate_acc_f1(model, dataloader, args=None, device=None):
+    model.eval()
+
+    if len(dataloader.dataset) == 0:
+        print("Warning: Evaluation dataloader is empty.")
+        return float("nan"), float("nan")
+
+    if device is None:
+        if args is not None:
+            device = torch.device(
+                "cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu"
+            )
+        else:
+            device = next(model.parameters()).device
+
+    all_logits = []
+    all_labels = []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            if len(batch) == 3:
+                x, y, _ = batch
+            else:
+                x, y = batch
+            x, y = x.to(device), y.to(device)
+            y = y.long()
+            _, logits = model(x)
+            all_logits.append(logits.detach())
+            all_labels.append(y.detach())
+
+    all_logits_cat = torch.cat(all_logits, dim=0)
+    all_labels_cat = torch.cat(all_labels, dim=0)
+
+    return calculate_acc_f1(all_labels_cat, all_logits_cat)

@@ -31,7 +31,7 @@ def init_args():
     parser.add_argument("--model", type=str, default="EEGNet")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--is_task", type=bool, default=True)
-    parser.add_argument("--torch_threads", type=int, default=4,
+    parser.add_argument("--torch_threads", type=int, default=5,
                         help="Number of threads to use for torch operations")
     parser.add_argument("--forget_subject", type=int, default=None,
                         help="Subject ID to forget for MU splits (default: random)")
@@ -43,7 +43,7 @@ def init_args():
                         help="Learning rate for DiCE unlearning")
     parser.add_argument("--dice_temperature", type=float, default=1.0,
                         help="Temperature for DiCE softmax")
-    parser.add_argument("--dice_margin", type=float, default=0.5,
+    parser.add_argument("--dice_margin", type=float, default=0.1,
                         help="Margin for DiCE true-class suppression")
     parser.add_argument("--dice_lambda_cf", type=float, default=1.0,
                         help="Weight for counterfactual distillation loss")
@@ -99,7 +99,7 @@ def set_args(args: argparse.ArgumentParser):
             args.timepoint = 4
         # UID分类
         if not args.is_task:
-            args.nclass = 54
+            args.nclass = 15 # Partial
     elif args.dataset in M3CV:
         args.channel = 64
         args.fs = 250
