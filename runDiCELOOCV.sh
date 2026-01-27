@@ -7,12 +7,12 @@ set -euo pipefail
 echo "DiCE LOOCV experiments (datasets: 001, 004, OpenBMI)"
 
 datasets=("001" "004" "MI" "SSVEP" "ERP")
-models=("EEGNet")
-# models=("DeepConvNet" "EEGNet" "ShallowConvNet")
+# models=("EEGNet")
+models=("DeepConvNet" "EEGNet" "ShallowConvNet")
 # Update this list if subject IDs differ in your .mat metadata.
-gpus=(1 2 3 4 5 6)
+gpus=(2 3 4 5 6)
 
-max_jobs=12
+max_jobs=15
 jobs=()
 job_idx=0
 failed=0

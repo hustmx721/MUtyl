@@ -265,9 +265,9 @@ def main():
 
             set_seed(args.seed)
             loaders = Load_MU_Dataloader(
-                args.seed,
-                args.dataset,
-                batchsize=args.bs,
+                seed = args.seed,
+                dataset = args.dataset,
+                batchsize=args.bs if args.dataset !="ERP" else 256,
                 is_task=args.is_task,
                 forget_subject=args.forget_subject,
             )

@@ -41,15 +41,15 @@ def init_args():
                         help="Number of epochs for DiCE unlearning")
     parser.add_argument("--dice_lr", type=float, default=1e-4,
                         help="Learning rate for DiCE unlearning")
-    parser.add_argument("--dice_temperature", type=float, default=1.0,
+    parser.add_argument("--dice_temperature", type=float, default=2.0,
                         help="Temperature for DiCE softmax")
-    parser.add_argument("--dice_margin", type=float, default=0.1,
+    parser.add_argument("--dice_margin", type=float, default=0.2,
                         help="Margin for DiCE true-class suppression")
-    parser.add_argument("--dice_lambda_cf", type=float, default=1.0,
+    parser.add_argument("--dice_lambda_cf", type=float, default=5.0,
                         help="Weight for counterfactual distillation loss")
-    parser.add_argument("--dice_lambda_m", type=float, default=1.0,
+    parser.add_argument("--dice_lambda_m", type=float, default=5.0,
                         help="Weight for margin suppression loss")
-    parser.add_argument("--dice_lambda_sub", type=float, default=1.0,
+    parser.add_argument("--dice_lambda_sub", type=float, default=5.0,
                         help="Weight for subspace regularization loss")
     parser.add_argument("--dice_beta_kd", type=float, default=1.0,
                         help="Weight for retain KD loss")

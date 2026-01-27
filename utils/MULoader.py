@@ -297,6 +297,9 @@ def GetMULoaderOpenBMI(
         test_y = data_test["label"].astype(np.int16)
         train_subject = _extract_subjects(data_train, allow_label_fallback=False)
         test_subject = _extract_subjects(data_test, allow_label_fallback=False)
+        if Task == "ERP":
+            train_subject = np.asarray(data_train.get("subjects")[:, :1000]).reshape(-1)
+            test_subject = np.asarray(data_test.get("subjects")[:, :1000]).reshape(-1)
     else:
         data_train = load_data(f"/mnt/data1/tyl/data/OpenBMI/processed/{Task}/train.pkl")
         data_test = load_data(f"/mnt/data1/tyl/data/OpenBMI/processed/{Task}/test.pkl")
@@ -309,7 +312,6 @@ def GetMULoaderOpenBMI(
 
     if train_subject is None or test_subject is None:
         raise ValueError("Subject metadata is required for MU splitting but was not found in OpenBMI data.")
-
     train_x, test_x = [x.reshape((-1, x.shape[-2], x.shape[-1])) for x in [train_x, test_x]]
     train_y, test_y = [y.reshape(-1) for y in [train_y, test_y]]
     train_subject, test_subject = [s.reshape(-1) for s in [train_subject, test_subject]]
@@ -452,7 +454,7 @@ def Load_MU_Dataloader(
         elif dataset in m3cv_tasks:
             paradigm = dataset
             dataset = "M3CV"
-
+    
     dataset_key = dataset_aliases.get(dataset)
 
     if dataset_key in {"001", "004"}:
