@@ -208,6 +208,7 @@ def _build_mu_loaders(
         "remain_train_loader": remain_train_loader,
         "forget_train_loader": forget_train_loader,
         "forget_subject": forget_subject,
+        "available_subjects": np.unique(subjects),
     }
     return loaders
 
