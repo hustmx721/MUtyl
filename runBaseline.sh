@@ -9,7 +9,7 @@ echo "Clean data baseline experiments (datasets: 001, 004, OpenBMI)"
 datasets=("001" "004" "MI" "SSVEP" "ERP")
 models=("DeepConvNet" "EEGNet" "ShallowConvNet")
 # Update this list if subject IDs differ in your .mat metadata.
-gpus=(1 2 3)
+gpus=(1 2 3 4 5)
 
 max_jobs=15
 jobs=()

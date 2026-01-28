@@ -124,7 +124,7 @@ def main():
     args.is_task = True
     args = set_args(args)
 
-    log_path = args.log_root / f"baseline_{args.dataset}_{args.model}.log"
+    log_path = args.log_root / f"Baseline_{args.dataset}_{args.model}.log"
     sys.stdout = Logger(log_path)
 
     device = torch.device("cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu")
@@ -239,7 +239,7 @@ def main():
 
         all_rows.extend(subject_rows)
 
-    result_df = pd.DataFrame(all_rows)
+    result_df = pd.DataFrame(all_rows).round(4)
     csv_path = args.csv_root / f"{args.dataset}"
     if not os.path.exists(csv_path):
         os.makedirs(csv_path)
