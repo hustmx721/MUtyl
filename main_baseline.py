@@ -124,7 +124,7 @@ def main():
     args.is_task = True
     args = set_args(args)
 
-    log_path = args.log_root / f"{args.dataset}_baseline_{args.model}.log"
+    log_path = args.log_root / f"baseline_{args.dataset}_{args.model}.log"
     sys.stdout = Logger(log_path)
 
     device = torch.device("cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu")

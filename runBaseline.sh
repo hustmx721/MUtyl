@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Batch runner for DiCE unlearning with leave-one-subject-out (LOOCV) splits.
+# Batch runner for clean data baseline experiments with leave-one-subject-out (LOOCV) splits.
 # Runs datasets 001, 004, and OpenBMI, forgetting one subject at a time.
 
-echo "DiCE LOOCV experiments (datasets: 001, 004, OpenBMI)"
+echo "Clean data baseline experiments (datasets: 001, 004, OpenBMI)"
 
-# datasets=("001" "004" "MI" "SSVEP" "ERP")
-datasets=("ERP")
-models=("DeepConvNet")
-# models=("DeepConvNet" "EEGNet" "ShallowConvNet")
+datasets=("001" "004" "MI" "SSVEP" "ERP")
+models=("DeepConvNet" "EEGNet" "ShallowConvNet")
 # Update this list if subject IDs differ in your .mat metadata.
-gpus=(0)
+gpus=(1 2 3)
 
 max_jobs=15
 jobs=()
@@ -42,7 +40,7 @@ for dataset in "${datasets[@]}"; do
     job_idx=$((job_idx + 1))
 
     echo "Launch: dataset=${dataset}, model=${model}, gpu=${gpu_id}"
-    python -u main_Dice.py \
+    python -u main_baseline.py \
       --dataset "${dataset}" \
       --model "${model}" \
       --gpuid "${gpu_id}" \
@@ -69,4 +67,4 @@ if (( failed == 1 )); then
   exit 1
 fi
 
-echo "All DiCE LOOCV experiments completed."
+echo "All clean data baseline LOOCV experiments completed."
