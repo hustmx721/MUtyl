@@ -143,52 +143,56 @@ def main():
 
     all_rows = []
     metric_cols = ["Retain_Acc", "Retain_F1", "Forget_Acc", "Forget_F1"]
+    subject_rows_map = {subject_id: [] for subject_id in subjects}
 
-    for subject_id in subjects:
-        subject_rows = []
+    for seed in seeds:
+        args.seed = seed
+        args = set_args(args)
+        start_time = time.time()
         print("=" * 30)
-        print(f"Baseline subject: {subject_id}")
-        for seed in seeds:
-            args.seed = seed
-            args = set_args(args)
-            start_time = time.time()
-            print("=" * 30)
-            print(f"dataset: {args.dataset}")
-            print(f"model  : {args.model}")
-            print(f"seed   : {args.seed}")
-            print(f"gpu    : {args.gpuid}")
-            print(f"is_task: {args.is_task}")
+        print(f"dataset: {args.dataset}")
+        print(f"model  : {args.model}")
+        print(f"seed   : {args.seed}")
+        print(f"gpu    : {args.gpuid}")
+        print(f"is_task: {args.is_task}")
 
-            set_seed(args.seed)
-            loaders = Load_MU_Dataloader(
+        set_seed(args.seed)
+        train_loaders = Load_MU_Dataloader(
+            args.seed,
+            args.dataset,
+            batchsize=args.bs,
+            is_task=args.is_task,
+            forget_subject=subjects[0],
+        )
+        print("=====================data are prepared===============")
+        print(f"累计用时{time.time() - start_time:.4f}s!")
+
+        save_prefix = f"Baseline_{args.model}_seed{args.seed}_allsubjects"
+        model = train_baseline(
+            train_loaders["train_loader"],
+            train_loaders["test_loader_remain"],
+            args,
+            save_prefix,
+        )
+
+        for subject_id in subjects:
+            eval_loaders = Load_MU_Dataloader(
                 args.seed,
                 args.dataset,
                 batchsize=args.bs,
                 is_task=args.is_task,
                 forget_subject=subject_id,
             )
-            print("=====================data are prepared===============")
-            print(f"累计用时{time.time() - start_time:.4f}s!")
-            print(f"Forget subject: {loaders['forget_subject']}")
-
-            save_prefix = f"Baseline_{args.model}_seed{args.seed}_forget{subject_id}"
-            model = train_baseline(
-                loaders["remain_train_loader"],
-                loaders["test_loader_remain"],
-                args,
-                save_prefix,
-            )
-
             retain_acc, retain_f1 = evaluate_acc_f1(
-                model, loaders["test_loader_remain"], args, device
+                model, eval_loaders["test_loader_remain"], args, device
             )
             forget_acc, forget_f1 = evaluate_acc_f1(
-                model, loaders["test_loader_forget"], args, device
+                model, eval_loaders["test_loader_forget"], args, device
             )
 
-            subject_rows.append(
+            subject_rows_map[subject_id].append(
                 {
-                    "Forget_Subject": loaders["forget_subject"],
+                    "Forget_Subject": eval_loaders["forget_subject"],
                     "Seed": seed,
                     "Retain_Acc": retain_acc,
                     "Retain_F1": retain_f1,
@@ -197,22 +201,21 @@ def main():
                 }
             )
             print(
-                "Retain Test  Acc:{:.2f}% F1:{:.2f}%".format(
+                "Subject {} | Retain Acc:{:.2f}% F1:{:.2f}% | Forget Acc:{:.2f}% F1:{:.2f}%".format(
+                    subject_id,
                     retain_acc * 100,
                     retain_f1 * 100,
-                )
-            )
-            print(
-                "Forget Test  Acc:{:.2f}% F1:{:.2f}%".format(
                     forget_acc * 100,
                     forget_f1 * 100,
                 )
             )
-            print("=====================baseline done===================")
-            print(f"累计用时{time.time() - start_time:.4f}s!")
-            gc.collect()
-            torch.cuda.empty_cache()
 
+        print("=====================baseline done===================")
+        print(f"累计用时{time.time() - start_time:.4f}s!")
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    for subject_id, subject_rows in subject_rows_map.items():
         subject_df = pd.DataFrame(subject_rows)
         subject_label = (
             subject_df["Forget_Subject"].iloc[0] if not subject_df.empty else subject_id
