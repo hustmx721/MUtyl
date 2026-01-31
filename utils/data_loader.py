@@ -18,6 +18,7 @@ import psutil
 import scipy.io as scio
 from sklearn.model_selection import train_test_split
 from dataset import ToDataLoader, set_seed
+from RandomLabel import shuffle_labels
 from preprocess import preprocessing
 
 
@@ -57,7 +58,14 @@ def _process_in_chunks(data, processor):
             processed_data[i : i + chunk_size] = future.result()
     return processed_data
 
-def GetLoader14xxx(seed, split: str = "001", is_task: bool = True, batchsize: int = 64, pin_memory: bool = True):
+def GetLoader14xxx(
+    seed,
+    split: str = "001",
+    is_task: bool = True,
+    batchsize: int = 64,
+    pin_memory: bool = True,
+    random_label: bool = False,
+):
     data = scio.loadmat(f"/mnt/data1/tyl/UserID/dataset/mydata/ori_{split}.mat")
     data1, data2 = data["ori_train_x"], data["ori_test_x"]
     if is_task:
@@ -69,6 +77,9 @@ def GetLoader14xxx(seed, split: str = "001", is_task: bool = True, batchsize: in
     DataProcessor = preprocessing(fs=250)
     data1, data2 = [DataProcessor.EEGpipline(x) for x in [data1, data2]]
     tx, vx, ty, vy = train_test_split(data1, label1, test_size=0.2, random_state=seed, stratify=label1)
+    if random_label:
+        ty = shuffle_labels(ty, seed=seed + 1)
+        vy = shuffle_labels(vy, seed=seed + 2)
 
     print(f"数据比例-----训练集:验证集:测试集 = {tx.shape}:{vx.shape}:{data2.shape}")
 
@@ -82,7 +93,14 @@ def GetLoader14xxx(seed, split: str = "001", is_task: bool = True, batchsize: in
 # MI:(54,200,62,4000) --> downsample: (54,200,62,1000)
 # SSVEP:(54,200,62,4000) --> downsample : (54,200,62,1000)
 # ERP:(54,4140,62,800) --> downsample : (54,200,62,800)
-def GetLoaderOpenBMI(seed, Task: str = "MI", batchsize: int = 64, is_task: bool = True, pin_memory: bool = True):
+def GetLoaderOpenBMI(
+    seed,
+    Task: str = "MI",
+    batchsize: int = 64,
+    is_task: bool = True,
+    pin_memory: bool = True,
+    random_label: bool = False,
+):
     def load_data(file_path):
         with open(file_path, "rb") as f:
             return pickle.load(f)
@@ -112,6 +130,9 @@ def GetLoaderOpenBMI(seed, Task: str = "MI", batchsize: int = 64, is_task: bool 
 
     train_x, test_x = [_process_in_chunks(x, processor) for x in [train_x, test_x]]
     tx, vx, ts, vs = train_test_split(train_x, train_y, test_size=0.2, random_state=seed, stratify=train_y)
+    if random_label:
+        ts = shuffle_labels(ts, seed=seed + 1)
+        vs = shuffle_labels(vs, seed=seed + 2)
 
     print("-----数据预处理完成-----")
     print(f"是否任务分类: {is_task}, 类别数量: {len(np.unique(train_y))}")
@@ -146,7 +167,14 @@ SSVEP_SA (480, 65, 1000) (480,) -- 20 * 24
 ! 注意: 去除EasyCap后是64通道
 """
 # Task = "Rest", "Transient", "Steady", "Motor"
-def GetLoaderM3CV(seed, Task: str = "Rest", batchsize: int = 64, is_task: bool = True, pin_memory: bool = True):
+def GetLoaderM3CV(
+    seed,
+    Task: str = "Rest",
+    batchsize: int = 64,
+    is_task: bool = True,
+    pin_memory: bool = True,
+    random_label: bool = False,
+):
     def load_data(file_path):
         with open(file_path, "rb") as f:
             return pickle.load(f)
@@ -171,6 +199,9 @@ def GetLoaderM3CV(seed, Task: str = "Rest", batchsize: int = 64, is_task: bool =
 
     train_x, test_x = [_process_in_chunks(x, processor) for x in [train_x, test_x]]
     tx, vx, ts, vs = train_test_split(train_x, train_y, test_size=0.2, random_state=seed, stratify=train_y)
+    if random_label:
+        ts = shuffle_labels(ts, seed=seed + 1)
+        vs = shuffle_labels(vs, seed=seed + 2)
 
     print("-----数据预处理完成-----")
     print(f"是否任务分类: {is_task}, 类别数量: {len(np.unique(train_y))}")
@@ -193,6 +224,7 @@ def Load_Dataloader(
     batchsize: int = 64,
     is_task: bool = True,
     pin_memory: bool = True,
+    random_label: bool = False,
 ):
     openbmi_tasks = ["MI", "SSVEP", "ERP"]
     m3cv_tasks = ["Rest", "Transient", "Steady", "P300", "Motor", "SSVEP_SA"]
@@ -223,6 +255,7 @@ def Load_Dataloader(
             split=dataset_key,
             batchsize=batchsize,
             pin_memory=pin_memory,
+            random_label=random_label,
         )
     elif dataset_key == "OpenBMI" and paradigm in openbmi_tasks:
         trainloader, valloader, testloader = GetLoaderOpenBMI(
@@ -231,6 +264,7 @@ def Load_Dataloader(
             batchsize=batchsize,
             is_task=is_task,
             pin_memory=pin_memory,
+            random_label=random_label,
         )
     elif dataset_key == "M3CV" and paradigm in m3cv_tasks:
         trainloader, valloader, testloader = GetLoaderM3CV(
@@ -239,6 +273,7 @@ def Load_Dataloader(
             batchsize=batchsize,
             is_task=is_task,
             pin_memory=pin_memory,
+            random_label=random_label,
         )
     else:
         raise ValueError(f"Invalid dataset or paradigm name: dataset={dataset}, paradigm={paradigm}")
