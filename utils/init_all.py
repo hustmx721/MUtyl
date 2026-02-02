@@ -59,6 +59,8 @@ def init_args():
                         help="Retain iterations per epoch (0 uses full retain loader)")
     parser.add_argument("--dice_freeze_head", action="store_true",
                         help="Freeze the classifier head during DiCE unlearning")
+    parser.add_argument("--ablation_groups", type=str, default=None,
+                        help="Comma-separated pre-ablation group keys (e.g., G0,G1,G2)")
     # logs path
     parser.add_argument("--log_root", type=Path, default=default_log_root,
                         help="Directory to store training logs")
