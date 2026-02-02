@@ -12,13 +12,15 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", str(DEFAULT_WORKERS))
 os.environ.setdefault("MKL_NUM_THREADS", str(DEFAULT_WORKERS))
 os.environ.setdefault("NUMEXPR_NUM_THREADS", str(DEFAULT_WORKERS))
 
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pickle
 import numpy as np
 import psutil
 import scipy.io as scio
 from sklearn.model_selection import train_test_split
 from dataset import ToDataLoader, set_seed
-from RandomLabel import shuffle_labels
+from SOTA.RandomLabel import shuffle_labels
 from preprocess import preprocessing
 
 
