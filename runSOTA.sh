@@ -7,11 +7,11 @@ set -euo pipefail
 echo "SOTA unlearning experiments (datasets: 001, 004, MI, SSVEP, ERP)"
 
 datasets=("001" "004" "MI" "SSVEP" "ERP")
-models=("DeepConvNet" "EEGNet" "ShallowConvNet")
+models=("EEGNet" "Conformer")
 methods=("ESC" "DELETE" "SCRUB" "GA" "LAF" "SISA")
-gpus=(1 2 3 4 5)
+gpus=(4 5 6)
 
-max_jobs=15
+max_jobs=12
 jobs=()
 job_idx=0
 failed=0
@@ -34,9 +34,9 @@ wait_one() {
   fi
 }
 
-for dataset in "${datasets[@]}"; do
+for method in "${methods[@]}"; do
   for model in "${models[@]}"; do
-    for method in "${methods[@]}"; do
+    for dataset in "${datasets[@]}"; do
       gpu_id=${gpus[$(( job_idx % ${#gpus[@]} ))]}
       job_idx=$((job_idx + 1))
 

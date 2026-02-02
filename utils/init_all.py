@@ -29,7 +29,7 @@ def init_args():
     parser.add_argument("--earlystop", type=int, default=30)
     parser.add_argument("--seed", type=int, default=2024)
     parser.add_argument("--model", type=str, default="EEGNet")
-    parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--is_task", type=bool, default=True)
     parser.add_argument("--torch_threads", type=int, default=5,
                         help="Number of threads to use for torch operations")
