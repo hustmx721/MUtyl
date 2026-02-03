@@ -103,9 +103,9 @@ class SCRUB:
                     inputs = self._move_to_device(inputs, device)
                     labels = labels.to(device, non_blocking=True).long()
 
-                    logits_s = self._forward(model, inputs)
+                    _, logits_s = self._forward(model, inputs)
                     with torch.no_grad():
-                        logits_t = self._forward(teacher, inputs)
+                        _, logits_t = self._forward(teacher, inputs)
 
                     loss_div = criterion_div(logits_s, logits_t)
                     loss = -loss_div + self._param_dist(model, swa_model)
@@ -120,9 +120,9 @@ class SCRUB:
                     inputs = self._move_to_device(inputs, device)
                     labels = labels.to(device, non_blocking=True).long()
 
-                    logits_s = self._forward(model, inputs)
+                    _, logits_s = self._forward(model, inputs)
                     with torch.no_grad():
-                        logits_t = self._forward(teacher, inputs)
+                        _, logits_t = self._forward(teacher, inputs)
 
                     loss_cls = criterion_cls(logits_s, labels)
                     loss_div = criterion_div(logits_s, logits_t)
