@@ -238,7 +238,7 @@ class LAF:
 
             for (_, _), (x, y) in zip(loaders["unlearn"], remain_loader):
                 x = x.to(device, non_blocking=True)
-                y = y.to(device, non_blocking=True)
+                y = y.to(device, non_blocking=True).long()
                 _, y_out = trained_model(x)
                 loss = loss_func(y_out, y)
 

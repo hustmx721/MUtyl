@@ -8,10 +8,9 @@ echo "SOTA unlearning experiments (datasets: 001, 004, MI, SSVEP, ERP)"
 
 datasets=("001" "004" "MI" "SSVEP" "ERP")
 models=("EEGNet" "Conformer")
-methods=("ESC" "GA" "DELETE" "SCRUB" "LAF" "SISA") 
-gpus=(2 3 4)
+gpus=(2 3 4 5 6)
 
-max_jobs=12
+max_jobs=10
 jobs=()
 job_idx=0
 failed=0
@@ -34,31 +33,27 @@ wait_one() {
   fi
 }
 
-for method in "${methods[@]}"; do
-  for model in "${models[@]}"; do
-    for dataset in "${datasets[@]}"; do
-      gpu_id=${gpus[$(( job_idx % ${#gpus[@]} ))]}
-      job_idx=$((job_idx + 1))
+for model in "${models[@]}"; do
+  for dataset in "${datasets[@]}"; do
+    gpu_id=${gpus[$(( job_idx % ${#gpus[@]} ))]}
+    job_idx=$((job_idx + 1))
 
-      echo "Launch: dataset=${dataset}, model=${model}, method=${method}, gpu=${gpu_id}"
-      python -u main_SOTA.py \
-        --dataset "${dataset}" \
-        --model "${model}" \
-        --gpuid "${gpu_id}" \
-        --methods "${method}" \
-        --is_task True \
-        --repeats 3 \
-        --seed 2024 &
+    echo "Launch: dataset=${dataset}, model=${model}, gpu=${gpu_id}"
+    python -u pre_sanity_check.py \
+      --dataset "${dataset}" \
+      --model "${model}" \
+      --gpuid "${gpu_id}" \
+      --repeats 3 \
+      --seed 2024 &
 
-      pid=$!
-      jobs+=("$pid")
+    pid=$!
+    jobs+=("$pid")
 
-      if (( ${#jobs[@]} >= max_jobs )); then
-        wait_one "${jobs[0]}"
-        jobs=("${jobs[@]:1}")
-      fi
+    if (( ${#jobs[@]} >= max_jobs )); then
+      wait_one "${jobs[0]}"
+      jobs=("${jobs[@]:1}")
+    fi
     done
-  done
 done
 
 for pid in "${jobs[@]}"; do

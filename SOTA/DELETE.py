@@ -53,7 +53,7 @@ class DELETE:
         for _ in tqdm(range(self.epoch), disable=not self.verbose, desc="DELETE: unlearn"):
             for x, y in forget_loader:
                 x = x.to(device, non_blocking=True)
-                y = y.to(device, non_blocking=True)
+                y = y.to(device, non_blocking=True).long()
 
                 if self.disable_bn:
                     for module in model.modules():

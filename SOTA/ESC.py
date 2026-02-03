@@ -155,7 +155,7 @@ class ESC:
         for _ in tqdm(range(self.epoch), disable=not self.verbose, desc="ESC-T: optimize"):
             for x, y in loader:
                 x = x.to(device, non_blocking=True)
-                y = y.to(device, non_blocking=True)
+                y = y.to(device, non_blocking=True).long()
 
                 mask = mask.detach()
                 mask.requires_grad_(True)
@@ -183,7 +183,7 @@ class ESC:
                 num_hits = 0
                 for x, y in loader:
                     x = x.to(device, non_blocking=True)
-                    y = y.to(device, non_blocking=True)
+                    y = y.to(device, non_blocking=True).long()
                     _, logits = model(x)
                     pred = logits.argmax(dim=1)
                     num_hits += (y == pred).sum().item()

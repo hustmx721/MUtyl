@@ -101,7 +101,7 @@ class SCRUB:
                 for batch in iterator:
                     inputs, labels = self._split_batch(batch)
                     inputs = self._move_to_device(inputs, device)
-                    labels = labels.to(device, non_blocking=True)
+                    labels = labels.to(device, non_blocking=True).long()
 
                     logits_s = self._forward(model, inputs)
                     with torch.no_grad():
@@ -118,7 +118,7 @@ class SCRUB:
                 for batch in iterator:
                     inputs, labels = self._split_batch(batch)
                     inputs = self._move_to_device(inputs, device)
-                    labels = labels.to(device, non_blocking=True)
+                    labels = labels.to(device, non_blocking=True).long()
 
                     logits_s = self._forward(model, inputs)
                     with torch.no_grad():

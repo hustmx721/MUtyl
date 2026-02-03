@@ -66,7 +66,7 @@ class GA:
             for batch in iterator:
                 inputs, labels = self._split_batch(batch)
                 inputs = self._move_to_device(inputs, device)
-                labels = labels.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True).long()
 
                 logits = self._forward(model, inputs)
                 loss_forget = criterion(logits, labels)
@@ -82,7 +82,7 @@ class GA:
                         retain_batch = next(retain_iter)
                     retain_inputs, retain_labels = self._split_batch(retain_batch)
                     retain_inputs = self._move_to_device(retain_inputs, device)
-                    retain_labels = retain_labels.to(device, non_blocking=True)
+                    retain_labels = retain_labels.to(device, non_blocking=True).long()
                     retain_logits = self._forward(model, retain_inputs)
                     retain_loss = criterion(retain_logits, retain_labels)
                     if self.config.normalize_loss:

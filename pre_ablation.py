@@ -21,19 +21,10 @@ from utils.dataset import set_seed
 from utils.init_all import apply_thread_limits, init_args, set_args, load_all
 from utils.Logging import Logger
 from utils.MULoader import Load_MU_Dataloader
+from main_Dice import DiceLossConfig,_unpack_features_logits, compute_feature_mean, compute_unit_direction, \
+    select_counterfactual_logits, margin_suppression_loss, train_teacher, freeze_classifier_head
 
 warnings.filterwarnings("ignore")
-
-
-@dataclass
-class DiceLossConfig:
-    temperature: float
-    margin: float
-    lambda_cf: float
-    lambda_m: float
-    lambda_sub: float
-    beta_kd: float
-
 
 @dataclass
 class AblationSpec:
@@ -45,67 +36,6 @@ class AblationSpec:
     use_retain: bool
     apply_projection: bool
     train_unlearn: bool
-
-
-def _unpack_features_logits(output):
-    if isinstance(output, (tuple, list)):
-        if len(output) != 2:
-            raise ValueError("Expected model to return (features, logits).")
-        return output
-    raise ValueError("Expected model to return (features, logits).")
-
-
-def compute_feature_mean(model: nn.Module, loader, device: torch.device) -> torch.Tensor:
-    model.eval()
-    feature_sum = None
-    count = 0
-    with torch.no_grad():
-        for x, _ in loader:
-            x = x.to(device, non_blocking=True)
-            features, _ = _unpack_features_logits(model(x))
-            batch_features = features.detach()
-            if feature_sum is None:
-                feature_sum = torch.zeros(batch_features.shape[1], device=device)
-            feature_sum += batch_features.sum(dim=0)
-            count += batch_features.shape[0]
-    if count == 0:
-        raise ValueError("No samples available for feature mean computation.")
-    return feature_sum / count
-
-
-def compute_unit_direction(mu_f: torch.Tensor, mu_r: torch.Tensor) -> torch.Tensor:
-    diff = mu_f - mu_r
-    norm = torch.norm(diff, p=2)
-    if norm == 0:
-        return torch.zeros_like(diff)
-    return diff / norm
-
-
-def select_counterfactual_logits(
-    logits_r: torch.Tensor,
-    y_r: torch.Tensor,
-    y_f: torch.Tensor,
-) -> torch.Tensor:
-    device = logits_r.device
-    batch_size = y_f.shape[0]
-    indices = torch.empty(batch_size, dtype=torch.long, device=device)
-    for idx, label in enumerate(y_f):
-        candidates = torch.nonzero(y_r != label, as_tuple=False).flatten()
-        if candidates.numel() == 0:
-            indices[idx] = torch.randint(0, logits_r.shape[0], (1,), device=device)
-        else:
-            rand_idx = torch.randint(0, candidates.numel(), (1,), device=device)
-            indices[idx] = candidates[rand_idx]
-    return logits_r[indices]
-
-
-def margin_suppression_loss(logits: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
-    true_logits = logits.gather(1, labels.view(-1, 1)).squeeze(1)
-    mask = torch.ones_like(logits, dtype=torch.bool)
-    mask.scatter_(1, labels.view(-1, 1), False)
-    max_other = logits.masked_fill(~mask, float("-inf")).max(dim=1).values
-    return F.relu(true_logits - max_other + margin).mean()
-
 
 class ProjectedModel(nn.Module):
     def __init__(self, base_model: nn.Module, u_f: torch.Tensor):
@@ -121,31 +51,7 @@ class ProjectedModel(nn.Module):
         return projected, logits
 
 
-def train_teacher(args, train_loader, device: torch.device) -> nn.Module:
-    model, optimizer, _ = load_all(args)
-    model.to(device)
-    torch.cuda.empty_cache()
-    torch.cuda.set_device(device)
-
-    clf_loss_func = nn.CrossEntropyLoss().to(device)
-    for _ in tqdm(range(args.dice_teacher_epochs), desc="Teacher Training:"):
-        train_one_epoch(
-            model=model,
-            dataloader=train_loader,
-            device=device,
-            optimizer=optimizer,
-            clf_loss_func=clf_loss_func,
-        )
-    return model
-
-
-def freeze_classifier_head(model: nn.Module) -> None:
-    clf = model.clf
-    for param in clf.parameters():
-        param.requires_grad = False
-
-
-def dice_unlearn(
+def dice_unlearn_ablation(
     student: nn.Module,
     teacher: nn.Module,
     loaders: dict,
@@ -273,7 +179,7 @@ def compute_margin_stats(
     with torch.no_grad():
         for x, y in loader:
             x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True).long()
             _, logits = _unpack_features_logits(model(x))
             true_logits = logits.gather(1, y.view(-1, 1)).squeeze(1)
             mask = torch.ones_like(logits, dtype=torch.bool)
@@ -334,7 +240,8 @@ def build_ablation_specs():
         "G4": AblationSpec("G4", "C-only", True, False, False, False, False, True),
         "G5": AblationSpec("G5", "C+M", True, True, False, False, False, True),
         "G6": AblationSpec("G6", "C+S", True, False, True, False, True, True),
-        "G7": AblationSpec("G7", "Full", True, True, True, True, True, True),
+        "G7": AblationSpec("G7", "M+S", False, True, True, False, True, True),
+        "G8": AblationSpec("G8", "Full", True, True, True, True, True, True),
     }
 
 
@@ -373,7 +280,7 @@ def main():
     specs = build_ablation_specs()
     group_arg = getattr(args, "ablation_groups", None)
     if not group_arg:
-        group_arg = "G0,G1,G2,G3,G4,G5,G6,G7"
+        group_arg = "G0,G1,G2,G3,G4,G5,G6,G7,G8"
     selected_specs = parse_groups(group_arg, specs)
 
     metric_cols = [
@@ -446,7 +353,7 @@ def main():
                         lambda_sub=args.dice_lambda_sub if spec.use_subspace else 0.0,
                         beta_kd=args.dice_beta_kd,
                     )
-                    student = dice_unlearn(
+                    student = dice_unlearn_ablation(
                         student,
                         teacher,
                         loaders,

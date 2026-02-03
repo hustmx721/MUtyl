@@ -94,7 +94,7 @@ class SISA:
             for batch in iterator:
                 inputs, labels = self._split_batch(batch)
                 inputs = self._move_to_device(inputs, device)
-                labels = labels.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True).long()
 
                 logits = self._forward(model, inputs)
                 loss = criterion(logits, labels)
