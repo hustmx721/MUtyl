@@ -53,6 +53,10 @@ def init_args():
                         help="Weight for subspace regularization loss")
     parser.add_argument("--dice_beta_kd", type=float, default=1.0,
                         help="Weight for retain KD loss")
+    parser.add_argument("--dice_gate_tau", type=float, default=0.6,
+                        help="Confidence gate threshold for soft margin")
+    parser.add_argument("--dice_gate_alpha", type=float, default=0.1,
+                        help="Confidence gate smoothness for soft margin")
     parser.add_argument("--dice_forget_iters", type=int, default=0,
                         help="Forget iterations per epoch (0 uses full forget loader)")
     parser.add_argument("--dice_retain_iters", type=int, default=0,
