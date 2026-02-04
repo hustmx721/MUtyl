@@ -5,7 +5,6 @@ import time
 import gc
 import warnings
 from dataclasses import dataclass
-from itertools import cycle
 
 import numpy as np
 import pandas as pd
@@ -33,6 +32,8 @@ class DiceLossConfig:
     lambda_m: float
     lambda_sub: float
     beta_kd: float
+    gate_tau: float
+    gate_alpha: float
 
 
 def _unpack_features_logits(output):
@@ -73,30 +74,39 @@ def compute_unit_direction(mu_f: torch.Tensor, mu_r: torch.Tensor) -> torch.Tens
     return diff / norm
 
 
-def select_counterfactual_logits(
-    logits_r: torch.Tensor,
-    y_r: torch.Tensor,
-    y_f: torch.Tensor,
+def freeze_bn_stats(model: nn.Module, freeze_affine: bool = False) -> None:
+    for module in model.modules():
+        if isinstance(module, nn.modules.batchnorm._BatchNorm):
+            module.eval()
+            if freeze_affine:
+                for param in module.parameters():
+                    param.requires_grad = False
+
+
+def mask_and_normalize(probs: torch.Tensor, labels: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    mask = torch.ones_like(probs)
+    mask.scatter_(1, labels.view(-1, 1), 0.0)
+    masked = probs * mask
+    denom = masked.sum(dim=1, keepdim=True)
+    return masked / (denom + eps)
+
+
+def gated_soft_margin_loss(
+    logits: torch.Tensor,
+    probs: torch.Tensor,
+    labels: torch.Tensor,
+    margin: float,
+    tau: float,
+    alpha: float,
 ) -> torch.Tensor:
-    device = logits_r.device
-    batch_size = y_f.shape[0]
-    indices = torch.empty(batch_size, dtype=torch.long, device=device)
-    for idx, label in enumerate(y_f):
-        candidates = torch.nonzero(y_r != label, as_tuple=False).flatten()
-        if candidates.numel() == 0:
-            indices[idx] = torch.randint(0, logits_r.shape[0], (1,), device=device)
-        else:
-            rand_idx = torch.randint(0, candidates.numel(), (1,), device=device)
-            indices[idx] = candidates[rand_idx]
-    return logits_r[indices]
-
-
-def margin_suppression_loss(logits: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
     true_logits = logits.gather(1, labels.view(-1, 1)).squeeze(1)
     mask = torch.ones_like(logits, dtype=torch.bool)
     mask.scatter_(1, labels.view(-1, 1), False)
     max_other = logits.masked_fill(~mask, float("-inf")).max(dim=1).values
-    return F.relu(true_logits - max_other + margin).mean()
+    margin_loss = F.softplus(true_logits - max_other + margin)
+    confidence = probs.gather(1, labels.view(-1, 1)).squeeze(1)
+    gate = torch.sigmoid((confidence - tau) / alpha)
+    return (gate * margin_loss).mean()
 
 
 def train_teacher(
@@ -140,6 +150,7 @@ def dice_unlearn(
     teacher = teacher.to(device)
     teacher.eval()
     student.train()
+    freeze_bn_stats(student)
 
     if args.dice_freeze_head:
         freeze_classifier_head(student)
@@ -150,7 +161,6 @@ def dice_unlearn(
     )
     forget_loader = loaders["forget_train_loader"]
     retain_loader = loaders["remain_train_loader"]
-    retain_cycle = cycle(retain_loader)
 
     forget_iters = args.dice_forget_iters or len(forget_loader)
     retain_iters = args.dice_retain_iters or len(retain_loader)
@@ -159,25 +169,32 @@ def dice_unlearn(
 
     for epoch in range(args.dice_unlearn_epochs):
         student.train()
-        for step, (x_f, y_f) in enumerate(forget_loader):
+        freeze_bn_stats(student)
+        for step, (x_f, _) in enumerate(forget_loader):
             if step >= forget_iters:
                 break
-            x_r, y_r = next(retain_cycle)
             x_f = x_f.to(device, non_blocking=True)
-            y_f = y_f.to(device, non_blocking=True)
-            x_r = x_r.to(device, non_blocking=True)
-            y_r = y_r.to(device, non_blocking=True)
 
             with torch.no_grad():
-                _, logits_r = _unpack_features_logits(teacher(x_r))
-                logits_r = select_counterfactual_logits(logits_r, y_r, y_f)
-                q = F.softmax(logits_r / config.temperature, dim=1)
+                _, logits_t = _unpack_features_logits(teacher(x_f))
+                probs_t = F.softmax(logits_t / config.temperature, dim=1)
+                pseudo_labels = probs_t.argmax(dim=1)
 
             features_f, logits_f = _unpack_features_logits(student(x_f))
-            log_p = F.log_softmax(logits_f / config.temperature, dim=1)
+            probs_u = F.softmax(logits_f / config.temperature, dim=1)
 
-            loss_cf = kl_loss(log_p, q)
-            loss_marg = margin_suppression_loss(logits_f, y_f.long(), config.margin)
+            masked_t = mask_and_normalize(probs_t, pseudo_labels)
+            masked_u = mask_and_normalize(probs_u, pseudo_labels)
+            log_masked_u = torch.log(masked_u + 1e-8)
+            loss_cf = kl_loss(log_masked_u, masked_t)
+            loss_marg = gated_soft_margin_loss(
+                logits_f,
+                probs_u,
+                pseudo_labels,
+                config.margin,
+                config.gate_tau,
+                config.gate_alpha,
+            )
             projection = torch.matmul(features_f, u_f)
             loss_sub = torch.mean(projection ** 2)
             loss_f = (
@@ -191,11 +208,11 @@ def dice_unlearn(
             optimizer.step()
 
         student.train()
-        for step, (x_r, y_r) in enumerate(retain_loader):
+        freeze_bn_stats(student)
+        for step, (x_r, _) in enumerate(retain_loader):
             if step >= retain_iters:
                 break
             x_r = x_r.to(device, non_blocking=True)
-            y_r = y_r.to(device, non_blocking=True)
 
             _, logits_u = _unpack_features_logits(student(x_r))
             # loss_ce = F.cross_entropy(logits_u, y_r)
@@ -296,6 +313,8 @@ def main():
                 lambda_m=args.dice_lambda_m,
                 lambda_sub=args.dice_lambda_sub,
                 beta_kd=args.dice_beta_kd,
+                gate_tau=args.dice_gate_tau,
+                gate_alpha=args.dice_gate_alpha,
             )
             student = dice_unlearn(student, teacher, loaders, u_f, loss_config, args, device)
 
