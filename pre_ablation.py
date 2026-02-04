@@ -22,7 +22,7 @@ from utils.init_all import apply_thread_limits, init_args, set_args, load_all
 from utils.Logging import Logger
 from utils.MULoader import Load_MU_Dataloader
 from main_Dice import DiceLossConfig,_unpack_features_logits, compute_feature_mean, compute_unit_direction, \
-    select_counterfactual_logits, margin_suppression_loss, train_teacher, freeze_classifier_head
+    train_teacher, freeze_classifier_head
 
 warnings.filterwarnings("ignore")
 
@@ -50,6 +50,30 @@ class ProjectedModel(nn.Module):
         logits = self.base_model.clf(projected)
         return projected, logits
 
+def select_counterfactual_logits(
+    logits_r: torch.Tensor,
+    y_r: torch.Tensor,
+    y_f: torch.Tensor,
+) -> torch.Tensor:
+    device = logits_r.device
+    batch_size = y_f.shape[0]
+    indices = torch.empty(batch_size, dtype=torch.long, device=device)
+    for idx, label in enumerate(y_f):
+        candidates = torch.nonzero(y_r != label, as_tuple=False).flatten()
+        if candidates.numel() == 0:
+            indices[idx] = torch.randint(0, logits_r.shape[0], (1,), device=device)
+        else:
+            rand_idx = torch.randint(0, candidates.numel(), (1,), device=device)
+            indices[idx] = candidates[rand_idx]
+    return logits_r[indices]
+
+
+def margin_suppression_loss(logits: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
+    true_logits = logits.gather(1, labels.view(-1, 1)).squeeze(1)
+    mask = torch.ones_like(logits, dtype=torch.bool)
+    mask.scatter_(1, labels.view(-1, 1), False)
+    max_other = logits.masked_fill(~mask, float("-inf")).max(dim=1).values
+    return F.relu(true_logits - max_other + margin).mean()
 
 def dice_unlearn_ablation(
     student: nn.Module,

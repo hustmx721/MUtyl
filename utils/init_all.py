@@ -39,17 +39,17 @@ def init_args():
                         help="Number of epochs to train the DiCE teacher")
     parser.add_argument("--dice_unlearn_epochs", type=int, default=100,
                         help="Number of epochs for DiCE unlearning")
-    parser.add_argument("--dice_lr", type=float, default=1e-4,
+    parser.add_argument("--dice_lr", type=float, default=5e-5,
                         help="Learning rate for DiCE unlearning")
     parser.add_argument("--dice_temperature", type=float, default=2.0,
                         help="Temperature for DiCE softmax")
-    parser.add_argument("--dice_margin", type=float, default=0.2,
+    parser.add_argument("--dice_margin", type=float, default=0.15,
                         help="Margin for DiCE true-class suppression")
-    parser.add_argument("--dice_lambda_cf", type=float, default=5.0,
+    parser.add_argument("--dice_lambda_cf", type=float, default=3.0,
                         help="Weight for counterfactual distillation loss")
-    parser.add_argument("--dice_lambda_m", type=float, default=5.0,
+    parser.add_argument("--dice_lambda_m", type=float, default=2.0,
                         help="Weight for margin suppression loss")
-    parser.add_argument("--dice_lambda_sub", type=float, default=5.0,
+    parser.add_argument("--dice_lambda_sub", type=float, default=1.0,
                         help="Weight for subspace regularization loss")
     parser.add_argument("--dice_beta_kd", type=float, default=1.0,
                         help="Weight for retain KD loss")
@@ -61,7 +61,7 @@ def init_args():
                         help="Forget iterations per epoch (0 uses full forget loader)")
     parser.add_argument("--dice_retain_iters", type=int, default=0,
                         help="Retain iterations per epoch (0 uses full retain loader)")
-    parser.add_argument("--dice_freeze_head", action="store_true",
+    parser.add_argument("--dice_freeze_head", type=bool, default=True, action="store_true",
                         help="Freeze the classifier head during DiCE unlearning")
     parser.add_argument("--ablation_groups", type=str, default=None,
                         help="Comma-separated pre-ablation group keys (e.g., G0,G1,G2)")
