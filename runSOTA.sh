@@ -8,9 +8,9 @@ echo "SOTA unlearning experiments (datasets: 001, 004, MI, SSVEP, ERP)"
 
 datasets=("001" "004" "MI" "SSVEP" "ERP")
 models=("EEGNet" "Conformer")
-methods=("ESC" "GA" "DELETE" "SCRUB" "LAF" "SISA") 
+methods=("DELETE" "SCRUB" "LAF" "SISA")  # "ESC" "GA"
 gpus=(2 3 4)
-
+# python -u main_SOTA.py --dataset 004 --model EEGNet --gpuid 1 --is_task True --repeats 3 --seed 2024 --methods SISA
 max_jobs=12
 jobs=()
 job_idx=0
