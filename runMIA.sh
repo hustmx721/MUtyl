@@ -6,19 +6,14 @@ set -euo pipefail
 
 datasets=("001" "004" "MI" "SSVEP" "ERP")
 models=("EEGNet" "Conformer")
-gpus=(4 5 6)
+gpus=(5 6)
 
 # 并发上限（建议 <= 可用GPU数 * 每卡可承载任务数）
-max_jobs=6
+max_jobs=10
 jobs=()
 failed=0
 job_idx=0
 
-# 全局实验参数
-seed=2024
-repeats=3
-bs=64
-is_task=True
 mia_methods="correctness,confidence,entropy,modified_entropy"
 
 cleanup() {
@@ -49,10 +44,6 @@ for dataset in "${datasets[@]}"; do
       --dataset "${dataset}" \
       --model "${model}" \
       --gpuid "${gpu_id}" \
-      --seed "${seed}" \
-      --repeats "${repeats}" \
-      --bs "${bs}" \
-      --is_task "${is_task}" \
       --mia_methods "${mia_methods}" &
 
     pid=$!

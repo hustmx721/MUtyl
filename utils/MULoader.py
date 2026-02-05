@@ -2,7 +2,8 @@ import os
 import gc
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-os.chdir(Path(__file__).resolve().parent)
+# os.chdir(Path(__file__).resolve().parent)
+
 # Cap low-level library threading before importing heavy deps to avoid oversubscribing
 # Allow overriding via DATA_WORKERS env for easier debugging or tighter CPU limits.
 DEFAULT_WORKERS = max(1, int(os.environ.get("DATA_WORKERS", min(4, (os.cpu_count() or 1)))))
@@ -15,8 +16,8 @@ import pickle
 import numpy as np
 import psutil
 import scipy.io as scio
-from dataset import ToDataLoader, set_seed
-from preprocess import preprocessing
+from .dataset import ToDataLoader, set_seed
+from .preprocess import preprocessing
 
 
 # CPU kernel limitation

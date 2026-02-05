@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 import torch
-
+import sys
+sys.path.append(Path(__file__).resolve().parent)
 from utils.MIA import run_mia_from_mu_loaders
 from utils.MULoader import Load_MU_Dataloader
 from utils.dataset import set_seed
@@ -26,10 +27,10 @@ def str2bool(value):
 def parse_args():
     project_root = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser("Evaluate DiCE checkpoints with black-box MIA")
-    parser.add_argument("--dataset", type=str, required=True)
+    parser.add_argument("--dataset", type=str, required=True, default="004")
     parser.add_argument("--model", type=str, default="EEGNet")
     parser.add_argument("--seed", type=int, default=2024)
-    parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--gpuid", type=int, default=0)
     parser.add_argument("--bs", type=int, default=64)
     parser.add_argument("--is_task", type=str2bool, default=True)
