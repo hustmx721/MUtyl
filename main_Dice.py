@@ -244,6 +244,7 @@ def main():
         "Retain_F1",
         "Forget_Acc",
         "Forget_F1",
+        "Runtime_Sec",
     ]
     all_rows = []
 
@@ -314,6 +315,7 @@ def main():
                 student, loaders["test_loader_forget"], args, device
             )
 
+            runtime = time.time() - start_time
             subject_rows.append(
                 {
                     "Forget_Subject": loaders["forget_subject"],
@@ -322,6 +324,7 @@ def main():
                     "Retain_F1": retain_f1,
                     "Forget_Acc": forget_acc,
                     "Forget_F1": forget_f1,
+                    "Runtime_Sec": runtime,
                 }
             )
             print(
@@ -337,7 +340,7 @@ def main():
                 )
             )
             print("=====================unlearning done===================")
-            print(f"累计用时{time.time() - start_time:.4f}s!")
+            print(f"累计用时{runtime:.4f}s!")
             gc.collect()
             torch.cuda.empty_cache()
 
