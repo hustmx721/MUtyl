@@ -8,7 +8,7 @@ echo "SOTA unlearning experiments (datasets: 001, 004, MI, SSVEP, ERP)"
 
 datasets=("001" "004" "MI" "SSVEP" "ERP")
 models=("EEGNet" "Conformer")
-gpus=(2 3 4 5 6)
+gpus=(5 6)
 
 max_jobs=10
 jobs=()
@@ -39,7 +39,7 @@ for model in "${models[@]}"; do
     job_idx=$((job_idx + 1))
 
     echo "Launch: dataset=${dataset}, model=${model}, gpu=${gpu_id}"
-    python -u pre_sanity_check.py \
+    python -u pre_ablation.py \
       --dataset "${dataset}" \
       --model "${model}" \
       --gpuid "${gpu_id}" \
