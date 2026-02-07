@@ -3,7 +3,6 @@ import os
 import sys
 import time
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -117,15 +116,6 @@ def run_sensitivity(
                 )
                 student = dice_unlearn(student, teacher, loaders, u_f, loss_config, args, device)
 
-                model_path = args.model_root / f"{args.dataset}"
-                if not os.path.exists(model_path):
-                    os.makedirs(model_path)
-                torch.save(
-                    student.state_dict(),
-                    model_path
-                    / f"DiCE_sensi_{param_name}_{value}_{args.model}_{args.seed}_forget{loaders['forget_subject']}.pth",
-                )
-
                 retain_acc, retain_f1 = evaluate_acc_f1(
                     student, loaders["test_loader_remain"], args, device
                 )
@@ -151,34 +141,74 @@ def run_sensitivity(
 def main():
     parser = build_arg_parser()
     parser.add_argument(
-        "--sensi_param",
-        type=str,
-        default="dice_temperature",
-        help="Argument name to sweep (e.g., dice_temperature, dice_margin, dice_lambda_cf).",
-    )
-    parser.add_argument(
         "--sensi_values",
         type=str,
         default="1.0,2.0,3.0",
         help="Comma-separated list of values to sweep.",
+    )
+    parser.add_argument(
+        "--sensi_params",
+        type=str,
+        default="dice_lambda_cf,dice_lambda_m,dice_lambda_sub,dice_temperature",
+        help="Comma-separated list of parameters to sweep.",
+    )
+    parser.add_argument(
+        "--temperature_values",
+        type=str,
+        default="1,2,3,4,5",
+        help="Values for dice_temperature.",
+    )
+    parser.add_argument(
+        "--lambda_cf_values",
+        type=str,
+        default="1,2,3,4,5",
+        help="Values for dice_lambda_cf.",
+    )
+    parser.add_argument(
+        "--lambda_m_values",
+        type=str,
+        default="0.5,1,2,3",
+        help="Values for dice_lambda_m.",
+    )
+    parser.add_argument(
+        "--lambda_sub_values",
+        type=str,
+        default="0.5,1,2",
+        help="Values for dice_lambda_sub.",
     )
     args = parser.parse_args()
     args = set_args(args)
     apply_thread_limits(getattr(args, "torch_threads", 5))
     device = torch.device("cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu")
 
-    log_path = args.log_root / f"{args.dataset}_sensi_{args.sensi_param}_{args.model}.log"
+    log_path = args.log_root / f"{args.dataset}_sensi_{args.model}.log"
     sys.stdout = Logger(log_path)
 
-    sensi_values = _parse_values(args.sensi_values)
-    rows = run_sensitivity(args, device, args.sensi_param, sensi_values)
+    param_list = [name.strip() for name in args.sensi_params.split(",") if name.strip()]
+    values_map = {
+        "dice_temperature": _parse_values(args.temperature_values),
+        "dice_lambda_cf": _parse_values(args.lambda_cf_values),
+        "dice_lambda_m": _parse_values(args.lambda_m_values),
+        "dice_lambda_sub": _parse_values(args.lambda_sub_values),
+    }
+    if args.sensi_values and args.sensi_values != "1.0,2.0,3.0":
+        override_values = _parse_values(args.sensi_values)
+        for param in param_list:
+            values_map[param] = override_values
+
+    rows = []
+    for param_name in param_list:
+        sensi_values = values_map.get(param_name)
+        if not sensi_values:
+            raise ValueError(f"No sensitivity values configured for {param_name}.")
+        rows.extend(run_sensitivity(args, device, param_name, sensi_values))
     if rows:
         df = pd.DataFrame(rows).round(4)
         csv_path = args.csv_root / f"{args.dataset}"
         if not os.path.exists(csv_path):
             os.makedirs(csv_path)
         df.to_csv(
-            csv_path / f"DiCE_sensi_{args.sensi_param}_{args.model}.csv",
+            csv_path / f"DiCE_sensi_{args.model}.csv",
             index=False,
         )
         print(f"Saved sensitivity results to {csv_path}")
