@@ -155,25 +155,25 @@ def main():
     parser.add_argument(
         "--temperature_values",
         type=str,
-        default="1,2,3,4,5",
+        default="1, 2, 3, 4, 5",
         help="Values for dice_temperature.",
     )
     parser.add_argument(
         "--lambda_cf_values",
         type=str,
-        default="1,2,3,4,5",
+        default="1, 2, 3, 4, 5",
         help="Values for dice_lambda_cf.",
     )
     parser.add_argument(
         "--lambda_m_values",
         type=str,
-        default="0.5,1,2,3",
+        default="0.05, 0.15, 0.25, 0.35, 0.45",
         help="Values for dice_lambda_m.",
     )
     parser.add_argument(
         "--lambda_sub_values",
         type=str,
-        default="0.5,1,2",
+        default="0.5, 1.0, 1.5, 2.0, 2.5",
         help="Values for dice_lambda_sub.",
     )
     args = parser.parse_args()
@@ -191,10 +191,6 @@ def main():
         "dice_lambda_m": _parse_values(args.lambda_m_values),
         "dice_lambda_sub": _parse_values(args.lambda_sub_values),
     }
-    if args.sensi_values and args.sensi_values != "1.0,2.0,3.0":
-        override_values = _parse_values(args.sensi_values)
-        for param in param_list:
-            values_map[param] = override_values
 
     rows = []
     for param_name in param_list:
