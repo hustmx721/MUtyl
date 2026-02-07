@@ -9,7 +9,7 @@ from data_loader import *
 from models import LoadModel
 
 
-def init_args():
+def build_arg_parser() -> argparse.ArgumentParser:
     project_root = Path(__file__).resolve().parent.parent
     default_log_root = project_root / "logs"
     default_model_root = project_root / "ModelSave"
@@ -70,6 +70,12 @@ def init_args():
                         help="Directory to store exported CSV results")
     parser.add_argument("--extra_sys_path", type=Path, default=default_sys_path,
                         help="Additional path to append to sys.path for imports")
+    return parser
+
+
+def init_args():
+    project_root = Path(__file__).resolve().parent.parent
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     # Append additional sys.path if provided
