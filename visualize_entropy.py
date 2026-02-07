@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""Visualize feature space (t-SNE) and output entropy for MU models.
-
-This script loads MU datasets via utils.MULoader and runs model forward
-passes to extract features/logits for visualization.
-"""
 from __future__ import annotations
 
 import argparse
@@ -52,24 +46,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--is_task", type=str2bool, default=True)
     parser.add_argument("--forget_subject", type=int, default=None)
     parser.add_argument(
-        "--split",
-        type=str,
-        choices=["forget", "remain"],
-        default="forget",
-        help="Use forget or remain test split for visualization.",
+        "--compare_splits",
+        action="store_true",
+        help="Compare forget vs remain splits for the same model checkpoint.",
     )
     parser.add_argument("--perplexity", type=float, default=30.0)
     parser.add_argument("--max_points", type=int, default=2000)
     parser.add_argument("--outdir", type=Path, default=Path("artifacts"))
     parser.add_argument("--torch_threads", type=int, default=4)
-    parser.add_argument("--original_ckpt", type=Path, required=True)
-    parser.add_argument("--unlearned_ckpt", type=Path, required=True)
-    parser.add_argument("--retrained_ckpt", type=Path, required=True)
     parser.add_argument(
-        "--names",
-        nargs=3,
-        default=["original model", "unlearned model", "retrained model"],
-        help="Names for the three models (original/unlearned/retrained).",
+        "--ckpt",
+        type=Path,
+        required=True,
+        help="Checkpoint path for the unlearned model to visualize.",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default="unlearned model",
+        help="Display name for the checkpoint.",
     )
     return parser.parse_args()
 
@@ -190,24 +185,33 @@ def main() -> None:
         is_task=args.is_task,
         forget_subject=args.forget_subject,
     )
-    split_key = "test_loader_forget" if args.split == "forget" else "test_loader_remain"
-    data_loader = loaders[split_key]
 
-    checkpoints = [args.original_ckpt, args.unlearned_ckpt, args.retrained_ckpt]
+    ckpt = args.ckpt
+    if not ckpt.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
+
+    model = LoadModel(
+        model_name=args.model,
+        Chans=args.channel,
+        Samples=int(args.fs * args.timepoint),
+        n_classes=args.nclass,
+    ).to(device)
+    load_checkpoint(model, ckpt, device)
+
     results: List[ModelResult] = []
-
-    for name, ckpt in zip(args.names, checkpoints):
-        model = LoadModel(
-            model_name=args.model,
-            Chans=args.channel,
-            Samples=int(args.fs * args.timepoint),
-            n_classes=args.nclass,
-        ).to(device)
-        if not ckpt.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
-        load_checkpoint(model, ckpt, device)
+    split_keys = ["test_loader_forget", "test_loader_remain"] if args.compare_splits else ["test_loader_forget"]
+    split_names = ["forget", "remain"] if args.compare_splits else ["forget"]
+    for split_key, split_name in zip(split_keys, split_names):
+        data_loader = loaders[split_key]
         features, labels, logits = collect_features(model, data_loader, device)
-        results.append(ModelResult(name=name, features=features, labels=labels, logits=logits))
+        results.append(
+            ModelResult(
+                name=f"{args.name} ({split_name})",
+                features=features,
+                labels=labels,
+                logits=logits,
+            )
+        )
 
     results = [subsample(result, args.max_points, args.seed) for result in results]
 
@@ -218,7 +222,7 @@ def main() -> None:
         "tsne_plot": str(tsne_path),
         "entropy_plot": str(entropy_path),
         "forget_subject": loaders.get("forget_subject"),
-        "split": args.split,
+        "compare_splits": args.compare_splits,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
