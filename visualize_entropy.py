@@ -16,6 +16,7 @@ from utils.dataset import set_seed
 from utils.init_all import apply_thread_limits, set_args
 from utils.models import LoadModel
 
+project_root = Path(__file__).resolve().parent.parent
 
 @dataclass
 class ModelResult:
@@ -186,7 +187,8 @@ def main() -> None:
         forget_subject=args.forget_subject,
     )
 
-    ckpt = args.ckpt
+    # ckpt = args.ckpt
+    ckpt = str(project_root / "ModelSave" / args.dataset / f"DiCE_{args.model}_{args.seed}_forget{args.forget_subject}.pth")
     if not ckpt.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
 

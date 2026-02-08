@@ -174,13 +174,13 @@ def main():
     parser.add_argument(
         "--lambda_m_values",
         type=str,
-        default="0.10, 0.15, 0.20, 0.25, 0.30",
+        default="0.05, 0.15, 0.25, 0.35, 0.45",
         help="Values for dice_lambda_m.",
     )
     parser.add_argument(
         "--lambda_sub_values",
         type=str,
-        default="1, 2, 3, 4, 5",
+        default="0.5, 1.0, 1.5, 2.0, 2.5",
         help="Values for dice_lambda_sub.",
     )
     args = parser.parse_args()
