@@ -51,16 +51,17 @@ def _resolve_forget_subjects(args):
 
 
 def run_sensitivity(
-    args,
+    base_args,
     device: torch.device,
     param_name: str,
     values: list,
 ):
-    seeds = list(range(args.seed, args.seed + args.repeats))
-    forget_subjects = _resolve_forget_subjects(args)
+    seeds = list(range(base_args.seed, base_args.seed + base_args.repeats))
+    forget_subjects = _resolve_forget_subjects(base_args)
 
     rows = []
     for value in values:
+        args = copy.deepcopy(base_args)
         setattr(args, param_name, value)
         print("=" * 30)
         print(f"Sensitivity param: {param_name} -> {value}")
@@ -140,6 +141,12 @@ def run_sensitivity(
 
 def main():
     parser = build_arg_parser()
+    parser.set_defaults(
+        dice_lambda_cf=3.0,
+        dice_lambda_m=0.15,
+        dice_lambda_sub=1.0,
+        dice_temperature=2.0,
+    )
     parser.add_argument(
         "--sensi_values",
         type=str,
@@ -167,19 +174,20 @@ def main():
     parser.add_argument(
         "--lambda_m_values",
         type=str,
-        default="0.05, 0.15, 0.25, 0.35, 0.45",
+        default="0.10, 0.15, 0.20, 0.25, 0.30",
         help="Values for dice_lambda_m.",
     )
     parser.add_argument(
         "--lambda_sub_values",
         type=str,
-        default="0.5, 1.0, 1.5, 2.0, 2.5",
+        default="1, 2, 3, 4, 5",
         help="Values for dice_lambda_sub.",
     )
     args = parser.parse_args()
     args = set_args(args)
     apply_thread_limits(getattr(args, "torch_threads", 5))
     device = torch.device("cuda:" + str(args.gpuid) if torch.cuda.is_available() else "cpu")
+    base_args = copy.deepcopy(args)
 
     log_path = args.log_root / f"{args.dataset}_sensi_{args.model}.log"
     sys.stdout = Logger(log_path)
@@ -192,19 +200,31 @@ def main():
         "dice_lambda_sub": _parse_values(args.lambda_sub_values),
     }
 
-    rows = []
+    csv_path = args.csv_root / f"{args.dataset}"
+    if not os.path.exists(csv_path):
+        os.makedirs(csv_path)
+
     for param_name in param_list:
         sensi_values = values_map.get(param_name)
         if not sensi_values:
             raise ValueError(f"No sensitivity values configured for {param_name}.")
-        rows.extend(run_sensitivity(args, device, param_name, sensi_values))
-    if rows:
-        df = pd.DataFrame(rows).round(4)
-        csv_path = args.csv_root / f"{args.dataset}"
-        if not os.path.exists(csv_path):
-            os.makedirs(csv_path)
-        df.to_csv(
-            csv_path / f"DiCE_sensi_{args.model}.csv",
+        rows = run_sensitivity(base_args, device, param_name, sensi_values)
+        if not rows:
+            continue
+        df = pd.DataFrame(rows)
+        summary = (
+            df.groupby(["Param", "Value", "Forget_Subject"], as_index=False)
+            .agg(
+                Retain_Acc=("Retain_Acc", "mean"),
+                Retain_F1=("Retain_F1", "mean"),
+                Forget_Acc=("Forget_Acc", "mean"),
+                Forget_F1=("Forget_F1", "mean"),
+                Seed_Count=("Seed", "count"),
+            )
+            .round(4)
+        )
+        summary.to_csv(
+            csv_path / f"DiCE_sensi_{args.model}_{param_name}.csv",
             index=False,
         )
         print(f"Saved sensitivity results to {csv_path}")
