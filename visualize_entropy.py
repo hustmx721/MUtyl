@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
 
 import numpy as np
 import torch
-from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
 
 from utils.MULoader import Load_MU_Dataloader
 from utils.dataset import set_seed
@@ -38,7 +35,7 @@ def str2bool(value):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Feature visualization + entropy histogram")
+    parser = argparse.ArgumentParser(description="Feature extraction for visualization")
     parser.add_argument("--dataset", type=str, default="004")
     parser.add_argument("--model", type=str, default="EEGNet")
     parser.add_argument("--seed", type=int, default=2024)
@@ -51,15 +48,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Compare forget vs remain splits for the same model checkpoint.",
     )
-    parser.add_argument("--perplexity", type=float, default=30.0)
-    parser.add_argument("--max_points", type=int, default=2000)
-    parser.add_argument("--outdir", type=Path, default=Path("artifacts"))
+    parser.add_argument("--features_dir", type=Path, default=Path("features"))
     parser.add_argument("--torch_threads", type=int, default=4)
     parser.add_argument(
         "--ckpt",
         type=Path,
-        required=True,
-        help="Checkpoint path for the unlearned model to visualize.",
+        default=None,
+        help="Checkpoint path for the unlearned model.",
     )
     parser.add_argument(
         "--name",
@@ -74,14 +69,6 @@ def load_checkpoint(model: torch.nn.Module, ckpt_path: Path, device: torch.devic
     state = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(state)
     return model
-
-
-def entropy_from_logits(logits: np.ndarray) -> np.ndarray:
-    logits = logits - logits.max(axis=1, keepdims=True)
-    exp = np.exp(logits)
-    probs = exp / exp.sum(axis=1, keepdims=True)
-    probs = np.clip(probs, 1e-12, 1.0)
-    return -np.sum(probs * np.log(probs), axis=1)
 
 
 def collect_features(
@@ -114,61 +101,23 @@ def collect_features(
     )
 
 
-def subsample(result: ModelResult, max_points: int, seed: int) -> ModelResult:
-    if len(result.features) <= max_points:
-        return result
-    rng = np.random.default_rng(seed)
-    idx = rng.choice(len(result.features), size=max_points, replace=False)
-    return ModelResult(
-        name=result.name,
-        features=result.features[idx],
-        labels=result.labels[idx],
-        logits=result.logits[idx],
+def resolve_checkpoint(args: argparse.Namespace) -> Path:
+    if args.ckpt is not None:
+        return args.ckpt
+    return project_root / "ModelSave" / args.dataset / f"DiCE_{args.model}_{args.seed}_forget{args.forget_subject}.pth"
+
+
+def save_feature_bundle(result: ModelResult, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "name": result.name,
+            "features": result.features,
+            "labels": result.labels,
+            "logits": result.logits,
+        },
+        output_path,
     )
-
-
-def tsne_plot(results: List[ModelResult], perplexity: float, seed: int, outdir: Path) -> Path:
-    fig, axes = plt.subplots(1, len(results), figsize=(12, 4))
-    if len(results) == 1:
-        axes = [axes]
-    for ax, result in zip(axes, results):
-        tsne = TSNE(n_components=2, init="pca", random_state=seed, perplexity=perplexity)
-        embedded = tsne.fit_transform(result.features)
-        unique_labels = np.unique(result.labels)
-        colors = plt.cm.tab10(np.linspace(0, 1, max(3, len(unique_labels))))
-        for idx, label in enumerate(unique_labels):
-            mask = result.labels == label
-            ax.scatter(
-                embedded[mask, 0],
-                embedded[mask, 1],
-                s=8,
-                c=[colors[idx]],
-                label=f"class {int(label)}",
-            )
-        ax.set_title(result.name)
-        ax.set_xticks([])
-        ax.set_yticks([])
-    fig.tight_layout()
-    outdir.mkdir(parents=True, exist_ok=True)
-    outpath = outdir / "feature_tsne.png"
-    fig.savefig(outpath, dpi=200)
-    return outpath
-
-
-def entropy_plot(results: List[ModelResult], outdir: Path) -> Path:
-    fig, ax = plt.subplots(figsize=(7, 4))
-    for result in results:
-        ent = entropy_from_logits(result.logits)
-        ax.hist(np.log(ent), bins=20, alpha=0.6, label=result.name)
-    ax.set_xlabel("Log of Entropy")
-    ax.set_ylabel("Number")
-    ax.set_title("Distribution of Output Entropy")
-    ax.legend()
-    fig.tight_layout()
-    outdir.mkdir(parents=True, exist_ok=True)
-    outpath = outdir / "entropy_hist.png"
-    fig.savefig(outpath, dpi=200)
-    return outpath
 
 
 def main() -> None:
@@ -187,8 +136,7 @@ def main() -> None:
         forget_subject=args.forget_subject,
     )
 
-    # ckpt = args.ckpt
-    ckpt = str(project_root / "ModelSave" / args.dataset / f"DiCE_{args.model}_{args.seed}_forget{args.forget_subject}.pth")
+    ckpt = resolve_checkpoint(args)
     if not ckpt.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
 
@@ -214,19 +162,10 @@ def main() -> None:
                 logits=logits,
             )
         )
-
-    results = [subsample(result, args.max_points, args.seed) for result in results]
-
-    tsne_path = tsne_plot(results, args.perplexity, args.seed, args.outdir)
-    entropy_path = entropy_plot(results, args.outdir)
-
-    summary = {
-        "tsne_plot": str(tsne_path),
-        "entropy_plot": str(entropy_path),
-        "forget_subject": loaders.get("forget_subject"),
-        "compare_splits": args.compare_splits,
-    }
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+        output_name = f"{args.dataset}_{args.model}_seed{args.seed}_forget{args.forget_subject}_{split_name}.pt"
+        output_path = args.features_dir / output_name
+        save_feature_bundle(results[-1], output_path)
+        print(f"Saved features to: {output_path}")
 
 
 if __name__ == "__main__":
