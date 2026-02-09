@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Compare forget vs remain splits for the same model checkpoint.",
     )
-    parser.add_argument("--features_dir", type=Path, default=Path("features"))
+    parser.add_argument("--features_dir", type=Path, default="/mnt/data1/tyl/MachineUnlearning/MUtyl/features")
     parser.add_argument("--torch_threads", type=int, default=4)
     parser.add_argument(
         "--ckpt",
@@ -104,7 +104,7 @@ def collect_features(
 def resolve_checkpoint(args: argparse.Namespace) -> Path:
     if args.ckpt is not None:
         return args.ckpt
-    return project_root / "ModelSave" / args.dataset / f"DiCE_{args.model}_{args.seed}_forget{args.forget_subject}.pth"
+    return project_root / "MUtyl" / "ModelSave" / args.dataset / f"DiCE_{args.model}_{args.seed}_forget{args.forget_subject}.pth"
 
 
 def save_feature_bundle(result: ModelResult, output_path: Path) -> None:
@@ -125,47 +125,51 @@ def main() -> None:
     args = set_args(args)
     apply_thread_limits(args.torch_threads)
     set_seed(args.seed)
+    subjects = np.arange(0, 9)
 
     device = torch.device(f"cuda:{args.gpuid}" if torch.cuda.is_available() else "cpu")
 
-    loaders = Load_MU_Dataloader(
-        seed=args.seed,
-        dataset=args.dataset,
-        batchsize=args.bs,
-        is_task=args.is_task,
-        forget_subject=args.forget_subject,
-    )
+    for subject in subjects:
+        args.forget_subject = int(subject)
 
-    ckpt = resolve_checkpoint(args)
-    if not ckpt.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
-
-    model = LoadModel(
-        model_name=args.model,
-        Chans=args.channel,
-        Samples=int(args.fs * args.timepoint),
-        n_classes=args.nclass,
-    ).to(device)
-    load_checkpoint(model, ckpt, device)
-
-    results: List[ModelResult] = []
-    split_keys = ["test_loader_forget", "test_loader_remain"] if args.compare_splits else ["test_loader_forget"]
-    split_names = ["forget", "remain"] if args.compare_splits else ["forget"]
-    for split_key, split_name in zip(split_keys, split_names):
-        data_loader = loaders[split_key]
-        features, labels, logits = collect_features(model, data_loader, device)
-        results.append(
-            ModelResult(
-                name=f"{args.name} ({split_name})",
-                features=features,
-                labels=labels,
-                logits=logits,
-            )
+        loaders = Load_MU_Dataloader(
+            seed=args.seed,
+            dataset=args.dataset,
+            batchsize=args.bs,
+            is_task=args.is_task,
+            forget_subject=args.forget_subject,
         )
-        output_name = f"{args.dataset}_{args.model}_seed{args.seed}_forget{args.forget_subject}_{split_name}.pt"
-        output_path = args.features_dir / output_name
-        save_feature_bundle(results[-1], output_path)
-        print(f"Saved features to: {output_path}")
+
+        ckpt = resolve_checkpoint(args)
+        if not ckpt.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
+
+        model = LoadModel(
+            model_name=args.model,
+            Chans=args.channel,
+            Samples=int(args.fs * args.timepoint),
+            n_classes=args.nclass,
+        ).to(device)
+        load_checkpoint(model, ckpt, device)
+
+        results: List[ModelResult] = []
+        split_keys = ["test_loader_forget", "test_loader_remain"] if args.compare_splits else ["test_loader_forget"]
+        split_names = ["forget", "remain"] if args.compare_splits else ["forget"]
+        for split_key, split_name in zip(split_keys, split_names):
+            data_loader = loaders[split_key]
+            features, labels, logits = collect_features(model, data_loader, device)
+            results.append(
+                ModelResult(
+                    name=f"{args.name} ({split_name})",
+                    features=features,
+                    labels=labels,
+                    logits=logits,
+                )
+            )
+            output_name = f"{args.dataset}_{args.model}_seed{args.seed}_forget{args.forget_subject}_{split_name}.pt"
+            output_path = args.features_dir / output_name
+            save_feature_bundle(results[-1], output_path)
+            print(f"Saved features to: {output_path}")
 
 
 if __name__ == "__main__":
